@@ -1,0 +1,90 @@
+# ==========================
+# macOS
+# ==========================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ==========================
+# Xcode Build
+# ==========================
+
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ==========================
+# Xcode User Settings
+# ==========================
+
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# ==========================
+# Swift Package Manager
+# ==========================
+
+.build/
+.swiftpm/
+
+# Keep Package.resolved if working in a team
+# Uncomment below only if intentionally ignoring it
+# Package.resolved
+
+# ==========================
+# Fastlane (if added later)
+# ==========================
+
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+
+# ==========================
+# CocoaPods (only if used)
+# ==========================
+
+Pods/
+
+# ==========================
+# Temporary Files
+# ==========================
+
+*.swp
+*.tmp
+*.orig
+
+# ==========================
+# Logs
+# ==========================
+
+*.log
+
+# ==========================
+# Environment / Secrets
+# ==========================
+
+.env
+.env.*
+Secrets.plist
+Config.plist
+
+# ==========================
+# Firebase / Google Services
+# (Ignore only if you don't want to commit them)
+# ==========================
+
+GoogleService-Info.plist
+
+# ==========================
+# Archive Files
+# ==========================
+
+*.xcarchive
