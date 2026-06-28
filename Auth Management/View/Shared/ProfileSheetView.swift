@@ -9,23 +9,11 @@ struct ProfileSheetView: View {
     @EnvironmentObject var authManager: AuthenticationManager
     @Environment(\.dismiss) private var dismiss
 
-    @State private var newUsername = ""
-    @State private var newPassword = ""
-    @State private var newDisplayName = ""
-    @State private var newStoreName = ""
-    @State private var newRole: UserRole = .boutiqueManager
-    @State private var newCountry: Country = .india
-    @State private var newRegion: Region = .mumbai
-    @State private var statusMessage: String?
-
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     profileCard
-                    if canCreateUsers {
-                        createUserCard
-                    }
                     signOutButton
                 }
                 .padding(.horizontal, 16)
@@ -35,12 +23,6 @@ struct ProfileSheetView: View {
             .background(MatteTheme.Colors.dashboardBackground.ignoresSafeArea())
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundColor(MatteTheme.Colors.espresso)
-                }
-            }
         }
     }
 
@@ -94,84 +76,6 @@ struct ProfileSheetView: View {
         }
     }
 
-    // MARK: - Create User Card
-
-    private var createUserCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "person.badge.plus")
-                    .foregroundColor(MatteTheme.Colors.primaryGold)
-                Text("Create User")
-                    .font(.headline)
-                    .foregroundColor(MatteTheme.Colors.textPrimary)
-            }
-
-            TextField("Display name", text: $newDisplayName)
-                .matteFieldStyle()
-            TextField("Username", text: $newUsername)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .matteFieldStyle()
-            SecureField("Password", text: $newPassword)
-                .matteFieldStyle()
-
-            if authManager.currentUser?.role == .corporateAdmin {
-                TextField("Store name", text: $newStoreName)
-                    .matteFieldStyle()
-
-                Picker("Role", selection: $newRole) {
-                    ForEach(creatableRoles) { role in
-                        Text(role.rawValue).tag(role)
-                    }
-                }
-                .pickerStyle(.menu)
-                .tint(MatteTheme.Colors.primaryGold)
-
-                HStack {
-                    Picker("Country", selection: $newCountry) {
-                        ForEach(Country.allCases) { c in
-                            Text(c.rawValue).tag(c)
-                        }
-                    }
-                    .pickerStyle(.menu)
-
-                    Picker("Region", selection: $newRegion) {
-                        ForEach(Region.allCases) { r in
-                            Text(r.rawValue).tag(r)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-                .tint(MatteTheme.Colors.primaryGold)
-            } else {
-                // Boutique Manager — role is locked to Sales Associate, store is auto-assigned
-                Text("Role: Sales Associate (auto-assigned to your store)")
-                    .font(.caption)
-                    .foregroundColor(MatteTheme.Colors.textSecondary)
-            }
-
-            Button(action: createUser) {
-                Label("Create Account", systemImage: "plus")
-                    .font(.headline)
-                    .foregroundColor(MatteTheme.Colors.ivoryMatte)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(MatteTheme.Colors.espresso)
-                    .cornerRadius(14)
-            }
-
-            if let statusMessage {
-                Text(statusMessage)
-                    .font(.footnote)
-                    .foregroundColor(MatteTheme.Colors.textSecondary)
-            }
-        }
-        .padding(20)
-        .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
-    }
-
     // MARK: - Sign Out
 
     private var signOutButton: some View {
@@ -192,72 +96,6 @@ struct ProfileSheetView: View {
                     RoundedRectangle(cornerRadius: 16)
                         .stroke(MatteTheme.Colors.primaryGold.opacity(0.22), lineWidth: 1)
                 )
-        }
-    }
-
-    // MARK: - Helpers
-
-    private var canCreateUsers: Bool {
-        guard let role = authManager.currentUser?.role else { return false }
-        return role == .corporateAdmin || role == .boutiqueManager
-    }
-
-    private var creatableRoles: [UserRole] {
-        switch authManager.currentUser?.role {
-        case .corporateAdmin:
-            return [.boutiqueManager, .inventoryController]
-        case .boutiqueManager:
-            return [.salesAssociate]
-        default:
-            return []
-        }
-    }
-
-    private func createUser() {
-        do {
-            let role = authManager.currentUser?.role == .boutiqueManager ? UserRole.salesAssociate : newRole
-
-            let storeLocation: StoreLocation
-            if authManager.currentUser?.role == .boutiqueManager {
-                // Auto-assign to manager's store
-                storeLocation = StoreLocation(
-                    name: authManager.currentUser?.storeName ?? "Store",
-                    country: authManager.currentUser?.country ?? .india,
-                    region: authManager.currentUser?.region ?? .mumbai
-                )
-            } else {
-                let name = newStoreName.trimmingCharacters(in: .whitespacesAndNewlines)
-                storeLocation = StoreLocation(
-                    name: name.isEmpty ? "\(newRegion.rawValue) Boutique" : name,
-                    country: newCountry,
-                    region: newRegion
-                )
-            }
-
-            let request = NewUserRequest(
-                username: newUsername,
-                password: newPassword,
-                displayName: newDisplayName,
-                role: role,
-                storeLocation: storeLocation
-            )
-
-            try authManager.createUser(request)
-
-            // Also register in MockLoginBackend
-            MockLoginBackend.shared.addCredentials(
-                username: newUsername,
-                password: newPassword,
-                role: role.rawValue
-            )
-
-            newUsername = ""
-            newPassword = ""
-            newDisplayName = ""
-            newStoreName = ""
-            statusMessage = "Account created successfully."
-        } catch {
-            statusMessage = error.localizedDescription
         }
     }
 }
@@ -288,15 +126,15 @@ struct ProfileToolbar: ViewModifier {
         content
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { showProfile = true }) {
-                        Image(systemName: "person.crop.circle")
+                    NavigationLink(destination: ProfileSheetView()) {
+                        Image(systemName: "person.fill")
                             .font(.title3)
                             .foregroundColor(MatteTheme.Colors.espresso)
+                            .padding(10)
+                            .background(Circle().fill(MatteTheme.Colors.primaryGold.opacity(0.15)))
+                            .padding(.horizontal, 12)
                     }
                 }
-            }
-            .sheet(isPresented: $showProfile) {
-                ProfileSheetView()
             }
     }
 }

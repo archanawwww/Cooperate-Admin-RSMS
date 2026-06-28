@@ -504,7 +504,7 @@ private struct KeychainCredentialStore {
         }
     }
 
-    private func readPassword(for username: String) throws -> String? {
+    func readPassword(for username: String) throws -> String? {
         var query = baseQuery(username: username)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -673,6 +673,77 @@ final class AuthenticationManager: ObservableObject {
 
         try persistDirectory()
         self.currentUser = AuthenticatedUser(user: users[index])
+    }
+
+    func updateManagedUser(
+        id: UUID,
+        displayName: String,
+        username: String,
+        password: String?,
+        role: UserRole,
+        storeLocation: StoreLocation,
+        isActive: Bool
+    ) throws {
+        guard let creator = currentManagedUser, creator.role == .corporateAdmin else {
+            throw AuthenticationError.actionNotAllowed
+        }
+
+        guard let index = users.firstIndex(where: { $0.id == id }) else {
+            throw AuthenticationError.userNotFound
+        }
+
+        let newUsername = try validateUsername(username)
+        let newDisplayName = try validateDisplayName(displayName)
+
+        guard users.contains(where: { $0.id != id && normalizedUsername($0.username) == normalizedUsername(newUsername) }) == false else {
+            throw AuthenticationError.usernameTaken
+        }
+
+        let oldUsername = users[index].username
+
+        // Validate or dynamically create the store
+        let validatedStore = try validatedStoreLocation(for: storeLocation, creator: creator, newRole: role)
+
+        users[index].displayName = newDisplayName
+        users[index].username = newUsername
+        users[index].role = role
+        users[index].storeLocation = validatedStore
+        users[index].assignedStoreID = role == .corporateAdmin ? nil : validatedStore.id
+        users[index].isActive = isActive
+        users[index].updatedAt = Date()
+
+        if let password = password, !password.isEmpty {
+            try credentialStore.save(password: password, for: newUsername)
+            MockLoginBackend.shared.updateCredentials(
+                oldUsername: oldUsername,
+                newUsername: newUsername,
+                newPassword: password,
+                role: role.rawValue
+            )
+        } else {
+            MockLoginBackend.shared.updateCredentials(
+                oldUsername: oldUsername,
+                newUsername: newUsername,
+                newPassword: nil,
+                role: role.rawValue
+            )
+            if normalizedUsername(oldUsername) != normalizedUsername(newUsername) {
+                if let oldPassword = try? credentialStore.readPassword(for: oldUsername) {
+                    try? credentialStore.save(password: oldPassword, for: newUsername)
+                    try? credentialStore.delete(username: oldUsername)
+                }
+            }
+        }
+
+        try persistDirectory()
+
+        if currentUser?.id == id {
+            self.currentUser = AuthenticatedUser(user: users[index])
+        }
+    }
+
+    var corporateHeadquartersID: UUID {
+        SeedData.corporateHeadquartersID
     }
 
     func users(for country: Country? = nil, region: Region? = nil) -> [ManagedUser] {
@@ -996,10 +1067,23 @@ final class AuthenticationManager: ObservableObject {
     private func validatedStoreLocation(for requestedStore: StoreLocation, creator: ManagedUser, newRole: UserRole) throws -> StoreLocation {
         switch creator.role {
         case .corporateAdmin:
-            guard newRole != .corporateAdmin, let store = knownStore(matching: requestedStore) else {
-                throw AuthenticationError.storeNotFound
+            guard newRole != .corporateAdmin else {
+                throw AuthenticationError.actionNotAllowed
             }
-            return store
+            if let store = knownStore(matching: requestedStore) {
+                return store
+            } else {
+                // Dynamically create a new store and save it!
+                let newStore = StoreLocation(
+                    id: UUID(),
+                    name: requestedStore.name.isEmpty ? "\(requestedStore.region.rawValue) Boutique" : requestedStore.name,
+                    country: requestedStore.country,
+                    region: requestedStore.region
+                )
+                stores.append(newStore)
+                try persistStores()
+                return newStore
+            }
         case .boutiqueManager:
             guard newRole == .salesAssociate,
                   let assignedStoreID = creator.assignedStoreID,
@@ -1377,3 +1461,4 @@ extension AuthenticationManager {
         persistActionLogs(actionLogs)
     }
 }
+

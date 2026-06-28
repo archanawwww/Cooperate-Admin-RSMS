@@ -11,6 +11,15 @@ public struct DashboardView: View {
 
     public var body: some View {
         ScrollView {
+            VStack(spacing: 16) {
+                // Greeting header as navigation title is set outside
+                // Top insights grid
+                if let user = authManager.currentUser {
+                    insightsGrid(user)
+                }
+            }
+            .padding(.top, 8)
+
             VStack(spacing: 18) {
                 if let user = authManager.currentUser {
                     userSummaryCard(user)
@@ -22,6 +31,8 @@ public struct DashboardView: View {
             .padding(.vertical, 24)
         }
         .safeAreaPadding(.horizontal, 16)
+        .navigationTitle("Good morning, Corporate Admin")
+        .navigationBarTitleDisplayMode(.large)
         .onAppear(perform: selectDefaultAssignee)
         .onChange(of: authManager.users) { _, _ in
             selectDefaultAssignee()
@@ -29,23 +40,17 @@ public struct DashboardView: View {
     }
 
     private func userSummaryCard(_ user: AuthenticatedUser) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Welcome,")
-                        .font(.title3)
-                        .foregroundColor(MatteTheme.Colors.textSecondary)
-
+                VStack(alignment: .leading, spacing: 6) {
                     Text(user.displayName)
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
+                        .font(.title3.weight(.semibold))
                         .foregroundColor(MatteTheme.Colors.textPrimary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
+                    Label(user.storeName, systemImage: "mappin.and.ellipse")
+                        .font(.subheadline)
+                        .foregroundColor(MatteTheme.Colors.textSecondary)
                 }
-
                 Spacer()
-
                 Circle()
                     .fill(MatteTheme.Colors.roleColor(for: user.role).opacity(0.14))
                     .frame(width: 56, height: 56)
@@ -56,18 +61,11 @@ public struct DashboardView: View {
                     )
             }
 
-            Divider()
-                .background(MatteTheme.Colors.border)
+            Divider().background(MatteTheme.Colors.border)
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    BadgeView(user.role.rawValue)
-                    BadgeView(user.region.rawValue)
-                }
-
-                Label(user.storeName, systemImage: "mappin.and.ellipse")
-                    .font(.subheadline)
-                    .foregroundColor(MatteTheme.Colors.textSecondary)
+            HStack(spacing: 10) {
+                BadgeView(user.role.rawValue)
+                BadgeView(user.region.rawValue)
             }
         }
         .padding(24)
@@ -298,6 +296,41 @@ public struct DashboardView: View {
 
     private func displayName(for userID: UUID) -> String {
         authManager.users.first(where: { $0.id == userID })?.displayName ?? "Unassigned"
+    }
+
+    private func insightsGrid(_ user: AuthenticatedUser) -> some View {
+        let columns = [GridItem(.flexible()), GridItem(.flexible())]
+        let employeeCount = authManager.users.count
+        let activeStoreCount = authManager.stores.count
+        let revenueString = "₹18,60,000" // Replace with real computation when available
+        let businessHealthString = "Strong" // Placeholder metric label
+
+        return LazyVGrid(columns: columns, spacing: 12) {
+            insightTile(title: "Revenue", value: revenueString, symbol: "chart.line.uptrend.xyaxis")
+            insightTile(title: "Business Health", value: businessHealthString, symbol: "heart.text.square")
+            insightTile(title: "Employees", value: "\(employeeCount)", symbol: "person.3")
+            insightTile(title: "Active Stores", value: "\(activeStoreCount)", symbol: "building.2")
+        }
+    }
+
+    private func insightTile(title: String, value: String, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: symbol).foregroundColor(MatteTheme.Colors.primaryGold)
+                Spacer()
+            }
+            Text(value)
+                .font(.title2.weight(.bold))
+                .foregroundColor(MatteTheme.Colors.textPrimary)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(MatteTheme.Colors.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
+        .background(MatteTheme.Colors.surface)
+        .cornerRadius(16)
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(MatteTheme.Colors.border, lineWidth: 1))
     }
 }
 

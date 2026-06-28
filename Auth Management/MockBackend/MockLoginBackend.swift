@@ -19,7 +19,7 @@ public class MockLoginBackend {
     // Admin-managed credential store
     private var credentials: [AdminLoginDetails] = [
         // Default Corporate Admin
-        AdminLoginDetails(username: "Admin", password: "AdminPassword123!", role: "Corporate Admin"),
+        AdminLoginDetails(username: "Admin", password: "123", role: "Corporate Admin"),
         // Seeded Boutique Manager for Mumbai Flagship
         AdminLoginDetails(username: "Manager", password: "Manager123!", role: "Boutique Manager"),
         // Seeded Inventory Controller
@@ -68,6 +68,19 @@ public class MockLoginBackend {
     public func updatePassword(username: String, newPassword: String) {
         if let index = credentials.firstIndex(where: { $0.username.lowercased() == username.lowercased() }) {
             credentials[index].password = newPassword
+        }
+    }
+
+    /// Update existing credentials or add if new
+    public func updateCredentials(oldUsername: String, newUsername: String, newPassword: String?, role: String) {
+        if let index = credentials.firstIndex(where: { $0.username.lowercased() == oldUsername.lowercased() }) {
+            credentials[index].username = newUsername
+            credentials[index].role = role
+            if let newPassword = newPassword {
+                credentials[index].password = newPassword
+            }
+        } else {
+            addCredentials(username: newUsername, password: newPassword ?? "", role: role)
         }
     }
 }
