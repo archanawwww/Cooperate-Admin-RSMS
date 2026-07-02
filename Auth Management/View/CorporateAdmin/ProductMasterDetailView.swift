@@ -6,11 +6,12 @@ struct ProductMasterDetailView: View {
     
     @State var product: ProductMasterRecord
     
-    // Editor State
     @State private var showProductEditor = false
-    
-    // Delete 2FA State
     @State private var show2FADelete = false
+    
+    // Audit expansion
+    @State private var isAuditExpanded = false
+    private let auditCollapsedLimit = 3
     
     var body: some View {
         ZStack {
@@ -25,8 +26,8 @@ struct ProductMasterDetailView: View {
                     // Detailed Information List
                     detailsCardView
                     
-                    // Actions Card
-                    actionsCardView
+                    // Edit / Archive / Delete actions
+                    productActionsSection
                     
                     // Audit Logs Timeline
                     auditHistoryTimeline
@@ -39,7 +40,7 @@ struct ProductMasterDetailView: View {
         .sheet(isPresented: $showProductEditor) {
             ProductMasterEditorView(product: product) { savedProduct in
                 authManager.updateProductMasterRecord(savedProduct)
-                self.product = savedProduct // update local state
+                product = savedProduct
                 showProductEditor = false
             }
             .environmentObject(authManager)
@@ -47,7 +48,7 @@ struct ProductMasterDetailView: View {
         .sheet(isPresented: $show2FADelete) {
             TwoFactorVerificationSheet(
                 title: "Confirm Deletion",
-                subtitle: "Permanently delete '\(product.name)'?",
+                subtitle: "Permanently deletes '\(product.name)' from the catalog",
                 onSuccess: {
                     authManager.deleteProductMasterRecord(id: product.id)
                     show2FADelete = false
@@ -57,20 +58,88 @@ struct ProductMasterDetailView: View {
         }
     }
     
+    // MARK: - Product Actions
+    
+    private var productActionsSection: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                productActionButton(
+                    title: "Edit",
+                    icon: "pencil",
+                    background: MatteTheme.Colors.primaryGold
+                ) {
+                    showProductEditor = true
+                }
+
+                productActionButton(
+                    title: "Archive",
+                    icon: "archivebox",
+                    background: MatteTheme.Colors.info
+                ) {
+                    archiveProduct()
+                }
+            }
+
+            productActionButton(
+                title: "Delete",
+                icon: "trash",
+                background: MatteTheme.Colors.error
+            ) {
+                show2FADelete = true
+            }
+        }
+    }
+
+    private func productActionButton(
+        title: String,
+        icon: String,
+        background: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(MatteTheme.Colors.ivoryMatte)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(background)
+                .cornerRadius(14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func archiveProduct() {
+        var updated = product
+        updated.isArchived = true
+        authManager.updateProductMasterRecord(updated)
+        product = updated
+        dismiss()
+    }
+    
     // MARK: - Header Card View (Visual Product Banner)
     
     private var headerCardView: some View {
         VStack(spacing: 12) {
-            // Glass circle image placeholder
-            Circle()
-                .fill(categoryColor.opacity(0.15))
-                .frame(width: 80, height: 80)
-                .overlay(
-                    Image(systemName: categoryIcon)
-                        .font(.system(size: 32))
-                        .foregroundColor(categoryColor)
-                )
-            
+            if let imageURLString = product.imageURL, let imageURL = URL(string: imageURLString) {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 80, height: 80)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(MatteTheme.Colors.border, lineWidth: 1.5))
+                    case .failure, .empty:
+                        fallbackMonogramCircle
+                    @unknown default:
+                        fallbackMonogramCircle
+                    }
+                }
+            } else {
+                fallbackMonogramCircle
+            }
+
             Text(product.brand.uppercased())
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(MatteTheme.Colors.textSecondary)
@@ -117,17 +186,22 @@ struct ProductMasterDetailView: View {
             
             detailRow(title: "Brand", value: product.brand)
             Divider()
-            detailRow(title: "Category", value: categoryName)
+            detailRow(title: "Category", value: product.category.isEmpty ? "Uncategorized" : product.category)
             Divider()
             detailRow(title: "SKU Code", value: product.sku)
             Divider()
             detailRow(title: "Barcode (EAN-13)", value: product.barcode.isEmpty ? "Not Assigned" : product.barcode)
             Divider()
-            detailRow(title: "Corporate Price (Retail)", value: formatPrice(product.price))
+            let pricing = authManager.pricingRules.first { $0.productID == product.id }
+            let displayPrice = pricing?.basePrice ?? product.price
+            let displayCost = pricing?.costPrice ?? product.costPrice
+            let displayTax = pricing?.tax ?? product.tax
+            
+            detailRow(title: "Corporate Price (Retail)", value: formatPrice(displayPrice))
             Divider()
-            detailRow(title: "Cost Price (HQ)", value: formatPrice(product.costPrice))
+            detailRow(title: "Cost Price (HQ)", value: formatPrice(displayCost))
             Divider()
-            detailRow(title: "Tax Rate", value: "\(Int(product.tax))%")
+            detailRow(title: "Tax Rate", value: "\(Int(displayTax))%")
             
             if let desc = product.description, !desc.isEmpty {
                 Divider()
@@ -151,65 +225,36 @@ struct ProductMasterDetailView: View {
         )
     }
     
-    // MARK: - Actions Card
-    
-    private var actionsCardView: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                // Edit Button
-                actionButton(title: "Edit", icon: "pencil", color: MatteTheme.Colors.primaryGold) {
-                    showProductEditor = true
-                }
-                
-                // Duplicate Button
-                actionButton(title: "Duplicate", icon: "doc.on.doc", color: MatteTheme.Colors.espresso) {
-                    duplicateProduct()
-                }
-            }
-            
-            HStack(spacing: 12) {
-                // Archive Button
-                actionButton(title: product.isArchived ? "Unarchive" : "Archive", icon: product.isArchived ? "archivebox.fill" : "archivebox", color: MatteTheme.Colors.info) {
-                    archiveProduct()
-                }
-                
-                // Delete Button (Destructive)
-                actionButton(title: "Delete", icon: "trash", color: MatteTheme.Colors.error) {
-                    show2FADelete = true
-                }
-            }
-        }
-    }
-    
-    private func actionButton(title: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.subheadline.weight(.semibold))
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-            }
-            .foregroundColor(MatteTheme.Colors.ivoryMatte)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(color)
-            .cornerRadius(14)
-        }
-        .buttonStyle(.plain)
-    }
-    
     // MARK: - Audit History Timeline
     
+    private var productAuditLogs: [AuditLog] {
+        authManager.productAuditLogs
+            .filter { $0.recordID == product.id }
+            .sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+    
     private var auditHistoryTimeline: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("AUDIT LOG HISTORY")
-                .font(.caption.weight(.bold))
-                .foregroundColor(MatteTheme.Colors.textSecondary)
-                .kerning(1.2)
-                .padding(.horizontal, 4)
-            
-            let logs = authManager.productAuditLogs.filter { $0.recordID == product.id }
-            
+        let logs = productAuditLogs
+        let hasMoreLogs = logs.count > auditCollapsedLimit
+        let visibleLogs = isAuditExpanded ? logs : Array(logs.prefix(auditCollapsedLimit))
+
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("AUDIT LOG HISTORY")
+                    .font(.caption.weight(.bold))
+                    .foregroundColor(MatteTheme.Colors.textSecondary)
+                    .kerning(1.2)
+
+                Spacer()
+
+                if !logs.isEmpty {
+                    Text("\(logs.count) \(logs.count == 1 ? "entry" : "entries")")
+                        .font(.caption)
+                        .foregroundColor(MatteTheme.Colors.textTertiary)
+                }
+            }
+            .padding(.horizontal, 4)
+
             if logs.isEmpty {
                 Text("No changes recorded in the audit logs.")
                     .font(.subheadline)
@@ -218,64 +263,37 @@ struct ProductMasterDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 VStack(spacing: 16) {
-                    ForEach(logs) { log in
-                        HStack(alignment: .top, spacing: 14) {
-                            // Timeline node
-                            VStack(spacing: 0) {
-                                Circle()
-                                    .fill(auditActionColor(log.action))
-                                    .frame(width: 12, height: 12)
-                                
-                                if log.id != logs.last?.id {
-                                    Rectangle()
-                                        .fill(MatteTheme.Colors.border)
-                                        .frame(width: 2, height: 60)
-                                }
+                    ForEach(Array(visibleLogs.enumerated()), id: \.element.id) { index, log in
+                        auditLogRow(
+                            log: log,
+                            isLast: index == visibleLogs.count - 1 && (!hasMoreLogs || isAuditExpanded)
+                        )
+                    }
+
+                    if hasMoreLogs {
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                isAuditExpanded.toggle()
                             }
-                            
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    // Action Badge
-                                    Text(log.action.rawValue)
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(auditActionColor(log.action))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(auditActionColor(log.action).opacity(0.12))
-                                        .cornerRadius(4)
-                                    
-                                    Spacer()
-                                    
-                                    // Timestamp
-                                    Text(log.modifiedAt, style: .date)
-                                        .font(.caption2)
-                                        .foregroundColor(MatteTheme.Colors.textTertiary)
-                                    Text(log.modifiedAt, style: .time)
-                                        .font(.caption2)
-                                        .foregroundColor(MatteTheme.Colors.textTertiary)
-                                }
-                                
-                                // User
-                                let modifierName = getModifierName(log.modifiedBy)
-                                Text("Modified by: @\(modifierName)")
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(isAuditExpanded ? "See Less" : "See More")
+                                    .font(.subheadline.weight(.medium))
+                                Image(systemName: "chevron.down")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundColor(MatteTheme.Colors.textPrimary)
-                                
-                                // Specific changes
-                                ForEach(parseChanges(prevStr: log.previousValues, newStr: log.newValues), id: \.self) { change in
-                                    Text("• \(change)")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(MatteTheme.Colors.textSecondary)
-                                }
+                                    .rotationEffect(.degrees(isAuditExpanded ? 180 : 0))
                             }
-                            .padding(14)
-                            .background(MatteTheme.Colors.surface.opacity(0.6))
-                            .cornerRadius(16)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(MatteTheme.Colors.border.opacity(0.6), lineWidth: 1)
-                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
                         }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(MatteTheme.Colors.primaryGold)
+                        .accessibilityLabel(isAuditExpanded ? "See Less" : "See More")
+                        .accessibilityHint(
+                            isAuditExpanded
+                                ? "Collapses the audit log history"
+                                : "Shows \(logs.count - auditCollapsedLimit) more audit log entries"
+                        )
                     }
                 }
             }
@@ -288,6 +306,63 @@ struct ProductMasterDetailView: View {
             RoundedRectangle(cornerRadius: 24)
                 .stroke(MatteTheme.Colors.border.opacity(0.8), lineWidth: 1)
         )
+    }
+    
+    private func auditLogRow(log: AuditLog, isLast: Bool) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(auditActionColor(log.action))
+                    .frame(width: 12, height: 12)
+                
+                if !isLast {
+                    Rectangle()
+                        .fill(MatteTheme.Colors.border)
+                        .frame(width: 2)
+                        .frame(minHeight: 60)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(log.action.rawValue)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(auditActionColor(log.action))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(auditActionColor(log.action).opacity(0.12))
+                        .cornerRadius(4)
+                    
+                    Spacer()
+                    
+                    Text(log.modifiedAt, style: .date)
+                        .font(.caption2)
+                        .foregroundColor(MatteTheme.Colors.textTertiary)
+                    Text(log.modifiedAt, style: .time)
+                        .font(.caption2)
+                        .foregroundColor(MatteTheme.Colors.textTertiary)
+                }
+                
+                let modifierName = getModifierName(log.modifiedBy)
+                Text("Modified by: @\(modifierName)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(MatteTheme.Colors.textPrimary)
+                
+                let changes = auditChangeDescriptions(for: log)
+                ForEach(changes, id: \.self) { change in
+                    Text("• \(change)")
+                        .font(.system(size: 11))
+                        .foregroundColor(MatteTheme.Colors.textSecondary)
+                }
+            }
+            .padding(14)
+            .background(MatteTheme.Colors.surface.opacity(0.6))
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(MatteTheme.Colors.border.opacity(0.6), lineWidth: 1)
+            )
+        }
     }
     
     // MARK: - Row Helpers
@@ -321,12 +396,32 @@ struct ProductMasterDetailView: View {
     }
     
     private func getModifierName(_ userID: UUID) -> String {
+        if let current = authManager.currentUser, current.id == userID {
+            return current.username
+        }
         if let user = authManager.users.first(where: { $0.id == userID }) {
             return user.username
         }
-        return "admin"
+        return authManager.currentUser?.username ?? "System"
     }
     
+    private func auditChangeDescriptions(for log: AuditLog) -> [String] {
+        var changes = parseChanges(prevStr: log.previousValues, newStr: log.newValues)
+
+        if changes.isEmpty {
+            switch log.action {
+            case .create:
+                changes.append("Product created")
+            case .update:
+                changes.append("Product edited")
+            case .delete:
+                changes.append("Product deleted")
+            }
+        }
+
+        return changes
+    }
+
     private func parseChanges(prevStr: String?, newStr: String?) -> [String] {
         let decoder = JSONDecoder()
         var changes: [String] = []
@@ -345,6 +440,7 @@ struct ProductMasterDetailView: View {
             if prev.isActive != new.isActive { changes.append("Status: \(prev.isActive ? "Active" : "Inactive") → \(new.isActive ? "Active" : "Inactive")") }
             if prev.isArchived != new.isArchived { changes.append("Archived: \(prev.isArchived) → \(new.isArchived)") }
             if prev.description != new.description { changes.append("Description modified") }
+            if prev.category != new.category { changes.append("Category: '\(prev.category)' → '\(new.category)'") }
         } else if let new = newRecord {
             changes.append("Product created: \(new.name) (\(new.sku))")
             changes.append("Initial Price: \(formatPrice(new.price))")
@@ -353,62 +449,38 @@ struct ProductMasterDetailView: View {
         }
         return changes
     }
-    
+
     // MARK: - Display Helper Properties
-    
-    private var categoryName: String {
-        if let catID = product.categoryID, let cat = authManager.itemCategories.first(where: { $0.id == catID }) {
-            return cat.name
-        }
-        return "Uncategorized"
-    }
-    
+
     private var categoryIcon: String {
-        switch product.sku.prefix(2) {
-        case "HB": return "handbag"
-        case "WT": return "clock"
-        case "FR": return "sparkles"
-        case "FW": return "shoe"
+        switch product.category.lowercased() {
+        case "purses", "handbags", "leather goods": return "handbag"
+        case "watches": return "clock"
+        case "fragrances": return "sparkles"
+        case "footwear", "sneakers": return "shoe"
         default: return "shippingbox"
         }
     }
-    
+
     private var categoryColor: Color {
-        switch product.sku.prefix(2) {
-        case "HB": return MatteTheme.Colors.primaryGold
-        case "WT": return MatteTheme.Colors.info
-        case "FR": return MatteTheme.Colors.warning
-        case "FW": return MatteTheme.Colors.success
+        switch product.category.lowercased() {
+        case "purses", "handbags", "leather goods": return MatteTheme.Colors.primaryGold
+        case "watches": return MatteTheme.Colors.info
+        case "fragrances": return MatteTheme.Colors.warning
+        case "footwear", "sneakers": return MatteTheme.Colors.success
         default: return MatteTheme.Colors.textSecondary
         }
     }
-    
-    // MARK: - Action Helpers
-    
-    private func duplicateProduct() {
-        let copy = ProductMasterRecord(
-            name: "\(product.name) (Copy)",
-            description: product.description,
-            categoryID: product.categoryID,
-            sku: "\(product.sku)-COPY",
-            authenticitySettings: product.authenticitySettings,
-            brand: product.brand,
-            price: product.price,
-            costPrice: product.costPrice,
-            tax: product.tax,
-            barcode: product.barcode + "9",
-            isActive: product.isActive,
-            isArchived: false
-        )
-        authManager.addProductMasterRecord(copy)
-        dismiss()
-    }
-    
-    private func archiveProduct() {
-        var updated = product
-        updated.isArchived.toggle()
-        authManager.updateProductMasterRecord(updated)
-        self.product = updated
+
+    private var fallbackMonogramCircle: some View {
+        Circle()
+            .fill(categoryColor.opacity(0.15))
+            .frame(width: 80, height: 80)
+            .overlay(
+                Image(systemName: categoryIcon)
+                    .font(.system(size: 32))
+                    .foregroundColor(categoryColor)
+            )
     }
 }
 

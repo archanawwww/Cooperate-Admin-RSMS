@@ -5,6 +5,7 @@ struct EditUserSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let user: ManagedUser
+    let onSaved: (ManagedUser) -> Void
 
     @State private var displayName: String
     @State private var username: String
@@ -17,8 +18,9 @@ struct EditUserSheet: View {
     @State private var statusMessage: String?
     @State private var isSuccess = false
 
-    init(user: ManagedUser) {
+    init(user: ManagedUser, onSaved: @escaping (ManagedUser) -> Void = { _ in }) {
         self.user = user
+        self.onSaved = onSaved
         _displayName = State(initialValue: user.displayName)
         _username = State(initialValue: user.username)
         _storeName = State(initialValue: user.storeLocation.name)
@@ -33,13 +35,17 @@ struct EditUserSheet: View {
             Form {
                 Section("Profile Details") {
                     TextField("Display Name", text: $displayName)
-                    TextField("Username", text: $username)
+                    TextField("Email", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .keyboardType(.emailAddress)
                 }
 
-                Section("Password (Leave blank to keep unchanged)") {
+                Section("Password") {
                     SecureField("New Password", text: $password)
+                    Text("Password changes require a Supabase admin backend function.")
+                        .font(.caption)
+                        .foregroundColor(MatteTheme.Colors.textSecondary)
                 }
 
                 Section("Role & Assignment") {
@@ -77,11 +83,11 @@ struct EditUserSheet: View {
                     Toggle("Is Active Account", isOn: $isActive)
                 }
 
-                if let statusMessage {
+                if let statusMessage, isSuccess {
                     Section {
                         Text(statusMessage)
                             .font(.footnote)
-                            .foregroundColor(isSuccess ? MatteTheme.Colors.success : MatteTheme.Colors.error)
+                            .foregroundColor(MatteTheme.Colors.success)
                     }
                 }
             }
@@ -108,36 +114,46 @@ struct EditUserSheet: View {
     }
 
     private func saveChanges() {
-        do {
-            let countryValue = role == .corporateAdmin ? Country.india : country
-            let regionValue = role == .corporateAdmin ? Region.mumbai : region
-            let storeNameValue = role == .corporateAdmin ? "Corporate Headquarters" : storeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let countryValue = role == .corporateAdmin ? Country.india : country
+        let regionValue = role == .corporateAdmin ? Region.mumbai : region
+        let storeNameValue = role == .corporateAdmin ? "Corporate Headquarters" : storeName.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let targetStore = StoreLocation(
-                name: storeNameValue.isEmpty ? "\(regionValue.rawValue) Boutique" : storeNameValue,
-                country: countryValue,
-                region: regionValue
-            )
+        let targetStore = StoreLocation(
+            name: storeNameValue.isEmpty ? "\(regionValue.rawValue) Boutique" : storeNameValue,
+            country: countryValue,
+            region: regionValue
+        )
 
-            try authManager.updateManagedUser(
-                id: user.id,
-                displayName: displayName,
-                username: username,
-                password: password.isEmpty ? nil : password,
-                role: role,
-                storeLocation: targetStore,
-                isActive: isActive
-            )
+        Task {
+            do {
+                try await authManager.updateManagedUser(
+                    id: user.id,
+                    displayName: displayName,
+                    username: username,
+                    password: password.isEmpty ? nil : password,
+                    role: role,
+                    storeLocation: targetStore,
+                    isActive: isActive
+                )
 
-            isSuccess = true
-            statusMessage = "User updated successfully."
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                dismiss()
+                await MainActor.run {
+                    isSuccess = true
+                    statusMessage = "User updated successfully."
+                    if let updatedUser = authManager.users.first(where: { $0.id == user.id }) {
+                        onSaved(updatedUser)
+                    }
+                }
+
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await MainActor.run {
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSuccess = false
+                    statusMessage = error.localizedDescription
+                }
             }
-        } catch {
-            isSuccess = false
-            statusMessage = error.localizedDescription
         }
     }
 }

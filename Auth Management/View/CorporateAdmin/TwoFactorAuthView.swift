@@ -26,9 +26,7 @@ struct TwoFactorAuthView: View {
                 .keyboardType(.numberPad)
                 .textFieldStyle(.plain)
                 .padding()
-                .background(MatteTheme.Colors.surface)
-                .cornerRadius(12)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(MatteTheme.Colors.border, lineWidth: 1))
+                .glassEffect(.regular, in: .rect(cornerRadius: 12))
                 .padding(.horizontal, 32)
             
             if let error = errorMessage {

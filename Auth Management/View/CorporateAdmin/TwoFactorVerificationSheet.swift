@@ -48,9 +48,9 @@ struct TwoFactorVerificationSheet: View {
                 
                 // FACE ID Scanning Section (iOS 26 Style)
                 ZStack {
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(.ultraThinMaterial)
+                    Color.clear
                         .frame(width: 140, height: 140)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 24))
                         .overlay(
                             RoundedRectangle(cornerRadius: 24)
                                 .stroke(faceIDSuccess ? MatteTheme.Colors.success : MatteTheme.Colors.primaryGold.opacity(0.4), lineWidth: 1.5)
@@ -105,7 +105,7 @@ struct TwoFactorVerificationSheet: View {
                         .keyboardType(.numberPad)
                         .matteFieldStyle()
                         .padding(.horizontal, 24)
-                        .onChange(of: otpCode) { _ in
+                        .onChange(of: otpCode) { oldValue, newValue in
                             if otpCode.count == 6 {
                                 verifyOTP()
                             }

@@ -26,7 +26,7 @@ struct SalesAssociateTabView: View {
             customersTab
                 .tabItem { Label("Customers", systemImage: "person.3") }
         }
-        .tint(MatteTheme.Colors.espresso)
+        .tint(MatteTheme.Colors.textPrimary)
         .onAppear {
             initializeDefaults()
         }
@@ -43,7 +43,7 @@ struct SalesAssociateTabView: View {
     private var floorTab: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: MatteTheme.Spacing.sectionSpacing) {
                     welcomeCard
 
                     infoCard(
@@ -53,9 +53,9 @@ struct SalesAssociateTabView: View {
                     )
 
                     sectionCard(title: "VIP Appointments", icon: "calendar") {
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: MatteTheme.Spacing.elementSpacing) {
                             appointmentRow(client: "Aditi Rao", time: "3:30 PM", notes: "Prefers leather goods, Birkin focus.")
-                            Divider()
+                            Divider().padding(.vertical, MatteTheme.Spacing.xs)
                             appointmentRow(client: "Cyrus Poonawalla", time: "5:00 PM", notes: "Looking at diamond cufflinks.")
                         }
                     }
@@ -64,22 +64,23 @@ struct SalesAssociateTabView: View {
                         let myTasks = authManager.tasksVisibleToCurrentUser()
                         if myTasks.isEmpty {
                             Text("No pending floor tasks assigned to you.")
-                                .font(.subheadline)
+                                .font(MatteTheme.Typography.subheadline)
                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                         } else {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: MatteTheme.Spacing.elementSpacing) {
                                 ForEach(myTasks) { task in
-                                    VStack(alignment: .leading, spacing: 4) {
+                                    VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                                         HStack {
                                             Text(task.title)
-                                                .font(.subheadline.weight(.semibold))
+                                                .font(MatteTheme.Typography.subheadline)
+                                                .fontWeight(.semibold)
                                                 .foregroundColor(MatteTheme.Colors.textPrimary)
                                             Spacer()
                                             BadgeView(text: task.priority.rawValue, color: priorityColor(task.priority))
                                         }
                                         if !task.notes.isEmpty {
                                             Text(task.notes)
-                                                .font(.caption)
+                                                .font(MatteTheme.Typography.caption)
                                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                                         }
                                         
@@ -87,17 +88,17 @@ struct SalesAssociateTabView: View {
                                             Button("Mark Completed") {
                                                 try? authManager.updateTaskStatus(id: task.id, status: .completed)
                                             }
-                                            .font(.caption)
+                                            .font(MatteTheme.Typography.caption)
                                             .foregroundColor(MatteTheme.Colors.success)
-                                            .padding(.top, 4)
+                                            .padding(.top, MatteTheme.Spacing.xs)
                                         } else {
                                             Text("Completed")
-                                                .font(.caption2)
+                                                .font(MatteTheme.Typography.caption2)
                                                 .foregroundColor(MatteTheme.Colors.textTertiary)
                                         }
                                         
                                         if task.id != myTasks.last?.id {
-                                            Divider().padding(.top, 6)
+                                            Divider().padding(.top, MatteTheme.Spacing.sm)
                                         }
                                     }
                                 }
@@ -105,8 +106,8 @@ struct SalesAssociateTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
+                .padding(.horizontal, MatteTheme.Spacing.horizontalMargin)
+                .padding(.top, MatteTheme.Spacing.lg)
                 .padding(.bottom, 96)
             }
             .background(MatteTheme.Colors.dashboardBackground.ignoresSafeArea())
@@ -121,7 +122,7 @@ struct SalesAssociateTabView: View {
     private var cartTab: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: MatteTheme.Spacing.sectionSpacing) {
                     infoCard(
                         title: "Boutique Checkout",
                         subtitle: "Create shopping carts and process customer transactions securely.",
@@ -129,81 +130,73 @@ struct SalesAssociateTabView: View {
                     )
 
                     sectionCard(title: "Add Item to Cart", icon: "cart.badge.plus") {
-                        VStack(spacing: 12) {
+                        VStack(spacing: MatteTheme.Spacing.elementSpacing) {
                             Picker("Product", selection: $selectedProductForCart) {
                                 ForEach(authManager.products) { product in
                                     Text("\(product.name) - \(product.formattedPrice)").tag(product.id)
                                 }
                             }
+                            .pickerStyle(.menu)
                             
                             Stepper("Quantity: \(cartQuantity)", value: $cartQuantity, in: 1...10)
                             
-                            Button(action: addToCart) {
-                                Text("Add to Cart")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundColor(MatteTheme.Colors.ivoryMatte)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 8)
-                                    .background(MatteTheme.Colors.espresso)
-                                    .cornerRadius(10)
-                            }
+                            LiquidGlassButton(title: "Add to Cart", action: addToCart)
                         }
                     }
 
                     sectionCard(title: "Shopping Cart", icon: "cart.fill") {
                         if currentCartItems.isEmpty {
                             Text("Your cart is empty.")
-                                .font(.subheadline)
+                                .font(MatteTheme.Typography.subheadline)
                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                                 .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 10)
+                                .padding(.vertical, MatteTheme.Spacing.md)
                         } else {
-                            VStack(spacing: 12) {
+                            VStack(spacing: MatteTheme.Spacing.elementSpacing) {
                                 ForEach(currentCartItems) { item in
                                     HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
+                                        VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                                             Text(item.product.name)
-                                                .font(.subheadline.weight(.medium))
+                                                .font(MatteTheme.Typography.subheadline)
+                                                .fontWeight(.medium)
                                                 .foregroundColor(MatteTheme.Colors.textPrimary)
                                             Text("\(item.quantity) x \(item.product.formattedPrice)")
-                                                .font(.caption)
+                                                .font(MatteTheme.Typography.caption)
                                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                                         }
                                         Spacer()
                                         
                                         Button(action: { removeFromCart(item: item) }) {
                                             Image(systemName: "trash")
-                                                .font(.caption)
+                                                .font(.system(size: 16, weight: .medium))
                                                 .foregroundColor(MatteTheme.Colors.error)
                                         }
+                                        .buttonStyle(.plain)
                                     }
-                                    Divider()
+                                    Divider().padding(.vertical, MatteTheme.Spacing.xs)
                                 }
                                 
                                 HStack {
                                     Text("Total Price")
-                                        .font(.headline)
+                                        .font(MatteTheme.Typography.headline)
                                         .foregroundColor(MatteTheme.Colors.textPrimary)
                                     Spacer()
                                     Text("€\(String(format: "%.2f", cartTotal()))")
-                                        .font(.headline)
-                                        .foregroundColor(MatteTheme.Colors.primaryGold)
+                                        .font(MatteTheme.Typography.headline)
+                                        .foregroundColor(MatteTheme.Colors.accent)
                                 }
-                                .padding(.vertical, 6)
+                                .padding(.vertical, MatteTheme.Spacing.sm)
 
-                                TextField("Customer Name", text: $selectedCustomerForSale)
-                                    .textFieldStyle(.roundedBorder)
-                                    .padding(.vertical, 4)
+                                LiquidGlassTextField(
+                                    placeholder: "Customer Name",
+                                    text: $selectedCustomerForSale
+                                )
+                                .padding(.vertical, MatteTheme.Spacing.xs)
 
-                                Button(action: checkout) {
-                                    Text("Complete Transaction")
-                                        .font(.headline.weight(.semibold))
-                                        .foregroundColor(MatteTheme.Colors.ivoryMatte)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(MatteTheme.Colors.espresso)
-                                        .cornerRadius(12)
-                                }
+                                LiquidGlassButton(
+                                    title: "Complete Transaction",
+                                    action: checkout
+                                )
                                 .disabled(selectedCustomerForSale.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
                         }
@@ -212,14 +205,14 @@ struct SalesAssociateTabView: View {
                     if let status = checkoutStatusMessage {
                         sectionCard(title: "Status", icon: "bell") {
                             Text(status)
-                                .font(.subheadline)
-                                .foregroundColor(MatteTheme.Colors.primaryGold)
+                                .font(MatteTheme.Typography.subheadline)
+                                .foregroundColor(MatteTheme.Colors.accent)
                                 .frame(maxWidth: .infinity, alignment: .center)
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
+                .padding(.horizontal, MatteTheme.Spacing.horizontalMargin)
+                .padding(.top, MatteTheme.Spacing.lg)
                 .padding(.bottom, 96)
             }
             .background(MatteTheme.Colors.dashboardBackground.ignoresSafeArea())
@@ -234,7 +227,7 @@ struct SalesAssociateTabView: View {
     private var customersTab: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: MatteTheme.Spacing.sectionSpacing) {
                     infoCard(
                         title: "Client Book",
                         subtitle: "View preferences and purchase histories for active high-net-worth clients.",
@@ -242,15 +235,15 @@ struct SalesAssociateTabView: View {
                     )
 
                     sectionCard(title: "Registered HNW Clients", icon: "person.crop.rectangle.stack") {
-                        VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: MatteTheme.Spacing.elementSpacing) {
                             customerRow(name: "Amit Patel", tier: "VVIP", preference: "Watches, Gold", history: "Purchased GMT Master in May 2026")
-                            Divider()
+                            Divider().padding(.vertical, MatteTheme.Spacing.xs)
                             customerRow(name: "Sarah Fernandes", tier: "VIP", preference: "Leather bags, scarves", history: "Purchased Silk Evening Clutch in June 2026")
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
+                .padding(.horizontal, MatteTheme.Spacing.horizontalMargin)
+                .padding(.top, MatteTheme.Spacing.lg)
                 .padding(.bottom, 96)
             }
             .background(MatteTheme.Colors.dashboardBackground.ignoresSafeArea())
@@ -328,20 +321,20 @@ struct SalesAssociateTabView: View {
     // MARK: - Reusable Components & Subviews
 
     private var welcomeCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: MatteTheme.Spacing.md) {
             if let user = authManager.currentUser {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: MatteTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                         Text("Welcome,")
-                            .font(.subheadline)
+                            .font(MatteTheme.Typography.subheadline)
                             .foregroundColor(MatteTheme.Colors.textSecondary)
                         Text(user.displayName)
-                            .font(.title2.weight(.bold))
+                            .font(MatteTheme.Typography.pageTitle)
                             .foregroundColor(MatteTheme.Colors.textPrimary)
                     }
                     Spacer()
                     Circle()
-                        .fill(MatteTheme.Colors.roleColor(for: user.role).opacity(0.14))
+                        .fill(MatteTheme.Colors.roleColor(for: user.role).opacity(0.12))
                         .frame(width: 52, height: 52)
                         .overlay(
                             Image(systemName: user.role.icon)
@@ -350,89 +343,100 @@ struct SalesAssociateTabView: View {
                         )
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: MatteTheme.Spacing.sm) {
                     BadgeView(text: user.role.rawValue, color: MatteTheme.Colors.roleColor(for: user.role))
                     BadgeView(text: user.storeName, color: MatteTheme.Colors.textSecondary)
                 }
             }
         }
-        .padding(20)
+        .padding(MatteTheme.Spacing.cardPadding)
         .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
+        .cornerRadius(MatteTheme.CornerRadius.large)
+        .overlay(RoundedRectangle(cornerRadius: MatteTheme.CornerRadius.large).stroke(MatteTheme.Colors.borderLight, lineWidth: 1))
+        .shadow(color: MatteTheme.Colors.textPrimary.opacity(0.04), radius: 16, x: 0, y: 4)
     }
 
     private func infoCard(title: String, subtitle: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).foregroundColor(MatteTheme.Colors.primaryGold)
+        VStack(alignment: .leading, spacing: MatteTheme.Spacing.sm) {
+            HStack(spacing: MatteTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(MatteTheme.Colors.accent)
                 Text(title)
-                    .font(.headline)
+                    .font(MatteTheme.Typography.sectionHeader)
                     .foregroundColor(MatteTheme.Colors.textPrimary)
             }
             Text(subtitle)
-                .font(.subheadline)
+                .font(MatteTheme.Typography.subheadline)
                 .foregroundColor(MatteTheme.Colors.textSecondary)
+                .lineSpacing(2)
         }
-        .padding(20)
+        .padding(MatteTheme.Spacing.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
+        .cornerRadius(MatteTheme.CornerRadius.large)
+        .overlay(RoundedRectangle(cornerRadius: MatteTheme.CornerRadius.large).stroke(MatteTheme.Colors.borderLight, lineWidth: 1))
+        .shadow(color: MatteTheme.Colors.textPrimary.opacity(0.04), radius: 12, x: 0, y: 4)
     }
 
     private func sectionCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).foregroundColor(MatteTheme.Colors.primaryGold)
+        VStack(alignment: .leading, spacing: MatteTheme.Spacing.md) {
+            HStack(spacing: MatteTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(MatteTheme.Colors.accent)
                 Text(title)
-                    .font(.headline)
+                    .font(MatteTheme.Typography.sectionHeader)
                     .foregroundColor(MatteTheme.Colors.textPrimary)
                 Spacer()
             }
             content()
         }
-        .padding(20)
+        .padding(MatteTheme.Spacing.cardPadding)
         .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
+        .cornerRadius(MatteTheme.CornerRadius.large)
+        .overlay(RoundedRectangle(cornerRadius: MatteTheme.CornerRadius.large).stroke(MatteTheme.Colors.borderLight, lineWidth: 1))
+        .shadow(color: MatteTheme.Colors.textPrimary.opacity(0.04), radius: 12, x: 0, y: 4)
     }
 
     private func appointmentRow(client: String, time: String, notes: String) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                 Text(client)
-                    .font(.subheadline.weight(.semibold))
+                    .font(MatteTheme.Typography.subheadline)
+                    .fontWeight(.semibold)
                     .foregroundColor(MatteTheme.Colors.textPrimary)
                 Text(notes)
-                    .font(.caption)
+                    .font(MatteTheme.Typography.caption)
                     .foregroundColor(MatteTheme.Colors.textSecondary)
             }
             Spacer()
             Text(time)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(MatteTheme.Colors.primaryGold)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(MatteTheme.Colors.primaryGold.opacity(0.12))
-                .cornerRadius(6)
+                .font(MatteTheme.Typography.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(MatteTheme.Colors.accent)
+                .padding(.horizontal, MatteTheme.Spacing.sm)
+                .padding(.vertical, MatteTheme.Spacing.xs)
+                .background(MatteTheme.Colors.accent.opacity(0.12))
+                .cornerRadius(MatteTheme.CornerRadius.small)
         }
     }
 
     private func customerRow(name: String, tier: String, preference: String, history: String) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                 HStack {
                     Text(name)
-                        .font(.subheadline.weight(.semibold))
+                        .font(MatteTheme.Typography.subheadline)
+                        .fontWeight(.semibold)
                         .foregroundColor(MatteTheme.Colors.textPrimary)
-                    BadgeView(text: tier, color: tier == "VVIP" ? MatteTheme.Colors.primaryGold : MatteTheme.Colors.success)
+                    BadgeView(text: tier, color: tier == "VVIP" ? MatteTheme.Colors.accent : MatteTheme.Colors.success)
                 }
                 Text("Preferences: \(preference)")
-                    .font(.caption)
+                    .font(MatteTheme.Typography.caption)
                     .foregroundColor(MatteTheme.Colors.textSecondary)
                 Text("History: \(history)")
-                    .font(.caption2)
+                    .font(MatteTheme.Typography.caption2)
                     .foregroundColor(MatteTheme.Colors.textTertiary)
             }
         }
