@@ -88,3 +88,4 @@ GoogleService-Info.plist
 # ==========================
 
 *.xcarchive
+.DS_Store

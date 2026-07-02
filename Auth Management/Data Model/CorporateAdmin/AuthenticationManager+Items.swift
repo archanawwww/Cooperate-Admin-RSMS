@@ -1,107 +1,228 @@
 import Foundation
-import Combine
+
 extension AuthenticationManager {
-    
-    // MARK: - Corporate Admin Items (Mock Data)
-    
-    // We store these mock records in UserDefaults for persistence
-    private var categoriesKey: String { "auth-management.categories" }
-    private var productMasterKey: String { "auth-management.product-master" }
+
+    // MARK: - UserDefaults Keys (for Audit Logs only now)
+
     private var auditLogsKey: String { "auth-management.audit-logs" }
-    
-    public var itemCategories: [Category] {
-        get {
-            guard let data = UserDefaults.standard.data(forKey: categoriesKey),
-                  let decoded = try? JSONDecoder().decode([Category].self, from: data), !decoded.isEmpty else {
-                return MockDataStore.categories
-            }
-            return decoded
+
+    // MARK: - Load / Persist
+
+    func loadCatalogData() {
+        productMasterRecords = []
+        productAuditLogs = loadAuditLogsFromStorage()
+        itemCategories = []
+    }
+
+    private func loadAuditLogsFromStorage() -> [AuditLog] {
+        guard let data = UserDefaults.standard.data(forKey: auditLogsKey),
+              let decoded = try? JSONDecoder().decode([AuditLog].self, from: data) else {
+            return []
         }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: categoriesKey)
+        return decoded
+    }
+
+    private func persistAuditLogs() {
+        guard let data = try? JSONEncoder().encode(productAuditLogs) else { return }
+        UserDefaults.standard.set(data, forKey: auditLogsKey)
+    }
+
+    // MARK: - Fetch Methods
+
+    public func fetchCategories() async {
+        do {
+            let supabaseCategories = try await SupabaseAuthService.shared.fetchCategories()
+            itemCategories = supabaseCategories.map {
+                Category(id: $0.id, name: $0.name, description: $0.description, createdAt: Date())
             }
+        } catch {
+            print("Failed to fetch categories: \(error)")
+        }
+    }
+
+    public func fetchCompanyPolicies() async {
+        do {
+            let supabasePolicies = try await SupabaseAuthService.shared.fetchCompanyPolicies()
+            companyPolicies = supabasePolicies.map {
+                CompanyPolicy(id: $0.id, title: $0.title, content: $0.content, lastUpdated: $0.lastUpdated)
+            }
+        } catch {
+            print("Failed to fetch company policies: \(error)")
         }
     }
     
-    public var productMasterRecords: [ProductMasterRecord] {
-        get {
-            guard let data = UserDefaults.standard.data(forKey: productMasterKey),
-                  let decoded = try? JSONDecoder().decode([ProductMasterRecord].self, from: data), !decoded.isEmpty else {
-                return MockDataStore.productMasterRecords
-            }
-            return decoded
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: productMasterKey)
-            }
+    public func fetchPricingRules() async {
+        do {
+            pricingRules = try await SupabaseAuthService.shared.fetchPricing()
+        } catch {
+            print("Failed to fetch pricing rules: \(error)")
         }
     }
-    
-    public var productAuditLogs: [AuditLog] {
-        get {
-            guard let data = UserDefaults.standard.data(forKey: auditLogsKey),
-                  let decoded = try? JSONDecoder().decode([AuditLog].self, from: data) else {
-                return []
+
+    private func syncCategoriesFromProducts(_ products: [ProductMasterRecord]) {
+        var categories = itemCategories
+        let categoryNames = Set(products.map(\.category).filter { !$0.isEmpty })
+
+        for name in categoryNames where !categories.contains(where: { $0.name == name }) {
+            let newCategory = Category(name: name)
+            categories.append(newCategory)
+            Task {
+                do {
+                    try await SupabaseAuthService.shared.createCategory(
+                        SupabaseCategory(id: newCategory.id, name: newCategory.name, description: newCategory.description)
+                    )
+                } catch {
+                    print("Failed to create category: \(error)")
+                }
             }
-            return decoded
         }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: auditLogsKey)
-            }
+
+        if categories != itemCategories {
+            itemCategories = categories
         }
     }
-    
-    // MARK: - Corporate Admin Item Methods
-    
+
+    // MARK: - Category Methods
+
     public func addCategory(name: String, description: String?) {
-        let newCat = Category(name: name, description: description)
-        var cats = itemCategories
-        cats.append(newCat)
-        itemCategories = cats
-        objectWillChange.send()
+        guard !itemCategories.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+            return
+        }
+        let newCategory = Category(name: name, description: description)
+        itemCategories.append(newCategory)
+        Task {
+            do {
+                try await SupabaseAuthService.shared.createCategory(
+                    SupabaseCategory(id: newCategory.id, name: newCategory.name, description: newCategory.description)
+                )
+            } catch {
+                print("Failed to create category: \(error)")
+            }
+        }
     }
-    
+
+    public func updateCategory(_ category: Category) {
+        guard let index = itemCategories.firstIndex(where: { $0.id == category.id }) else { return }
+        itemCategories[index] = category
+        Task {
+            do {
+                try await SupabaseAuthService.shared.updateCategory(
+                    SupabaseCategory(id: category.id, name: category.name, description: category.description)
+                )
+            } catch {
+                print("Failed to update category: \(error)")
+            }
+        }
+    }
+
+    public func deleteCategory(id: UUID) {
+        itemCategories.removeAll { $0.id == id }
+        Task {
+            do {
+                try await SupabaseAuthService.shared.deleteCategory(id: id)
+            } catch {
+                print("Failed to delete category: \(error)")
+            }
+        }
+    }
+
+    public func categoryName(for id: UUID?) -> String? {
+        guard let id else { return nil }
+        return itemCategories.first(where: { $0.id == id })?.name
+    }
+
+    // MARK: - Product Master Methods
+
+    public func fetchProductMasterRecords() async {
+        do {
+            let products = try await SupabaseAuthService.shared.fetchProducts()
+            productMasterRecords = products
+            syncCategoriesFromProducts(products)
+        } catch {
+            print("Failed to fetch products: \(error)")
+        }
+    }
+
     public func addProductMasterRecord(_ record: ProductMasterRecord) {
-        var records = productMasterRecords
-        records.append(record)
-        productMasterRecords = records
-        logAuditAction(action: .create, tableName: "ProductMasterRecord", recordID: record.id, previousValues: nil, newValues: encodeToString(record))
-        objectWillChange.send()
+        Task {
+            do {
+                try await SupabaseAuthService.shared.createProduct(product: record)
+                await fetchProductMasterRecords()
+                logAuditAction(
+                    action: .create,
+                    tableName: "Product",
+                    recordID: record.id,
+                    previousValues: nil,
+                    newValues: encodeToString(record)
+                )
+            } catch {
+                print("Failed to create product: \(error)")
+            }
+        }
     }
-    
+
     public func updateProductMasterRecord(_ record: ProductMasterRecord) {
-        var records = productMasterRecords
-        if let index = records.firstIndex(where: { $0.id == record.id }) {
-            let oldRecord = records[index]
-            records[index] = record
-            productMasterRecords = records
-            logAuditAction(action: .update, tableName: "ProductMasterRecord", recordID: record.id, previousValues: encodeToString(oldRecord), newValues: encodeToString(record))
-            objectWillChange.send()
+        let oldRecord = productMasterRecords.first(where: { $0.id == record.id })
+        Task {
+            do {
+                try await SupabaseAuthService.shared.updateProduct(product: record)
+                await fetchProductMasterRecords()
+                if let oldRecord {
+                    logAuditAction(
+                        action: .update,
+                        tableName: "Product",
+                        recordID: record.id,
+                        previousValues: encodeToString(oldRecord),
+                        newValues: encodeToString(record)
+                    )
+                }
+            } catch {
+                print("Failed to update product: \(error)")
+            }
         }
     }
-    
+
     public func deleteProductMasterRecord(id: UUID) {
-        var records = productMasterRecords
-        if let index = records.firstIndex(where: { $0.id == id }) {
-            let oldRecord = records[index]
-            records.remove(at: index)
-            productMasterRecords = records
-            logAuditAction(action: .delete, tableName: "ProductMasterRecord", recordID: id, previousValues: encodeToString(oldRecord), newValues: nil)
-            objectWillChange.send()
+        let oldRecord = productMasterRecords.first(where: { $0.id == id })
+        Task {
+            do {
+                try await SupabaseAuthService.shared.deleteProduct(id: id)
+                await fetchProductMasterRecords()
+                if let oldRecord {
+                    logAuditAction(
+                        action: .delete,
+                        tableName: "Product",
+                        recordID: id,
+                        previousValues: encodeToString(oldRecord),
+                        newValues: nil
+                    )
+                }
+            } catch {
+                print("Failed to delete product: \(error)")
+            }
         }
     }
-    
-    private func logAuditAction(action: AuditAction, tableName: String, recordID: UUID, previousValues: String?, newValues: String?) {
-        guard let currentUser = currentUser else { return }
-        let log = AuditLog(tableName: tableName, recordID: recordID, action: action, modifiedBy: currentUser.id, previousValues: previousValues, newValues: newValues)
-        var logs = productAuditLogs
-        logs.insert(log, at: 0)
-        productAuditLogs = logs
+
+    public func logAuditAction(
+        action: AuditAction,
+        tableName: String,
+        recordID: UUID,
+        previousValues: String?,
+        newValues: String?
+    ) {
+        let modifierID = currentUser?.id ?? UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let log = AuditLog(
+            tableName: tableName,
+            recordID: recordID,
+            action: action,
+            modifiedBy: modifierID,
+            previousValues: previousValues,
+            newValues: newValues
+        )
+        productAuditLogs.insert(log, at: 0)
+        persistAuditLogs()
     }
-    
+
     private func encodeToString<T: Encodable>(_ object: T) -> String? {
         guard let data = try? JSONEncoder().encode(object) else { return nil }
         return String(data: data, encoding: .utf8)

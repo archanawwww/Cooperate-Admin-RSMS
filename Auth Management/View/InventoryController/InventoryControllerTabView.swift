@@ -36,7 +36,7 @@ struct InventoryControllerTabView: View {
             variancesTab
                 .tabItem { Label("Variances", systemImage: "exclamationmark.triangle") }
         }
-        .tint(MatteTheme.Colors.espresso)
+        .tint(MatteTheme.Colors.textPrimary)
         .onAppear {
             initializeDefaults()
         }
@@ -54,7 +54,7 @@ struct InventoryControllerTabView: View {
     private var warehouseTab: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: MatteTheme.Spacing.sectionSpacing) {
                     welcomeCard
 
                     infoCard(
@@ -67,71 +67,75 @@ struct InventoryControllerTabView: View {
                         let warehouseRecs = authManager.inventoryRecords.filter { $0.storeID == SeedData.corporateHeadquartersID }
                         if warehouseRecs.isEmpty {
                             Text("No central warehouse records found.")
-                                .font(.subheadline)
+                                .font(MatteTheme.Typography.subheadline)
                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                         } else {
-                            VStack(spacing: 14) {
+                            VStack(spacing: MatteTheme.Spacing.elementSpacing) {
                                 ForEach(warehouseRecs) { record in
                                     let product = authManager.products.first(where: { $0.id == record.productID })
                                     let pName = product?.name ?? "Unknown Product"
                                     let sku = product?.sku ?? "SKU"
                                     
-                                    HStack(spacing: 12) {
+                                    HStack(spacing: MatteTheme.Spacing.md) {
                                         Circle()
-                                            .fill(stockColor(record.quantity <= record.reorderThreshold ? .critical : .healthy).opacity(0.15))
-                                            .frame(width: 38, height: 38)
+                                            .fill(stockColor(record.quantity <= record.reorderThreshold ? .critical : .healthy).opacity(0.12))
+                                            .frame(width: 44, height: 44)
                                             .overlay(
                                                 Image(systemName: "cube.box")
+                                                    .font(.system(size: 18, weight: .medium))
                                                     .foregroundColor(stockColor(record.quantity <= record.reorderThreshold ? .critical : .healthy))
                                             )
                                         
-                                        VStack(alignment: .leading, spacing: 2) {
+                                        VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                                             Text(pName)
-                                                .font(.subheadline.weight(.semibold))
+                                                .font(MatteTheme.Typography.subheadline)
+                                                .fontWeight(.semibold)
                                                 .foregroundColor(MatteTheme.Colors.textPrimary)
                                             Text("\(sku) • Reorder point: \(record.reorderThreshold)")
-                                                .font(.caption)
+                                                .font(MatteTheme.Typography.caption)
                                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                                         }
                                         
                                         Spacer()
                                         
                                         // Quick Warehouse Qty Adjustments
-                                        HStack(spacing: 10) {
+                                        HStack(spacing: MatteTheme.Spacing.sm) {
                                             Button(action: {
                                                 if record.quantity > 0 {
                                                     try? authManager.updateInventoryQuantity(productID: record.productID, storeID: record.storeID, newQuantity: record.quantity - 1)
                                                 }
                                             }) {
                                                 Image(systemName: "minus.circle.fill")
-                                                    .font(.title3)
+                                                    .font(.system(size: 24))
                                                     .foregroundColor(MatteTheme.Colors.textSecondary)
                                             }
+                                            .buttonStyle(.plain)
                                             
                                             Text("\(record.quantity)")
-                                                .font(.headline)
+                                                .font(MatteTheme.Typography.headline)
                                                 .foregroundColor(MatteTheme.Colors.textPrimary)
-                                                .frame(minWidth: 26)
+                                                .frame(minWidth: 28)
                                             
                                             Button(action: {
                                                 try? authManager.updateInventoryQuantity(productID: record.productID, storeID: record.storeID, newQuantity: record.quantity + 1)
                                             }) {
                                                 Image(systemName: "plus.circle.fill")
-                                                    .font(.title3)
-                                                    .foregroundColor(MatteTheme.Colors.espresso)
+                                                    .font(.system(size: 24))
+                                                    .foregroundColor(MatteTheme.Colors.textPrimary)
                                             }
+                                            .buttonStyle(.plain)
                                         }
                                     }
                                     if record.id != warehouseRecs.last?.id {
-                                        Divider()
+                                        Divider().padding(.vertical, MatteTheme.Spacing.xs)
                                     }
                                 }
                             }
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
+                .padding(.horizontal, MatteTheme.Spacing.horizontalMargin)
+                .padding(.top, MatteTheme.Spacing.lg)
                 .padding(.bottom, 96)
             }
             .background(MatteTheme.Colors.dashboardBackground.ignoresSafeArea())
@@ -146,7 +150,7 @@ struct InventoryControllerTabView: View {
     private var movementTab: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: MatteTheme.Spacing.sectionSpacing) {
                     infoCard(
                         title: "Log Movements",
                         subtitle: "Record influxes of new stock from suppliers, or manage outfluxes by transferring items to boutiques.",
@@ -155,49 +159,39 @@ struct InventoryControllerTabView: View {
 
                     HStack {
                         Spacer()
-                        Button(action: { showRecordMovementSheet = true }) {
-                            HStack {
-                                Image(systemName: "plus")
-                                Text("Record Stock Movement")
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(MatteTheme.Colors.ivoryMatte)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(MatteTheme.Colors.espresso)
-                            .cornerRadius(12)
-                        }
+                        LiquidGlassButton(title: "Record Stock Movement", action: { showRecordMovementSheet = true })
                     }
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, MatteTheme.Spacing.xs)
 
                     sectionCard(title: "Recent Actions Log", icon: "list.bullet.rectangle.portrait") {
                         let filteredLogs = authManager.actionLogs.filter { $0.username == authManager.currentUser?.username }
                         if filteredLogs.isEmpty {
                             Text("No movements recorded by you yet.")
-                                .font(.subheadline)
+                                .font(MatteTheme.Typography.subheadline)
                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                         } else {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: MatteTheme.Spacing.elementSpacing) {
                                 ForEach(filteredLogs) { log in
-                                    VStack(alignment: .leading, spacing: 4) {
+                                    VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                                         HStack {
                                             Text(log.actionType)
-                                                .font(.subheadline.weight(.semibold))
+                                                .font(MatteTheme.Typography.subheadline)
+                                                .fontWeight(.semibold)
                                                 .foregroundColor(MatteTheme.Colors.textPrimary)
                                             Spacer()
                                             Text(log.date, style: .time)
-                                                .font(.caption)
+                                                .font(MatteTheme.Typography.caption)
                                                 .foregroundColor(MatteTheme.Colors.textTertiary)
                                         }
                                         Text(log.details)
-                                            .font(.caption)
+                                            .font(MatteTheme.Typography.caption)
                                             .foregroundColor(MatteTheme.Colors.textSecondary)
                                         Text("Store: \(log.storeName)")
-                                            .font(.system(size: 10))
+                                            .font(MatteTheme.Typography.caption2)
                                             .foregroundColor(MatteTheme.Colors.textTertiary)
                                         
                                         if log.id != filteredLogs.last?.id {
-                                            Divider().padding(.top, 6)
+                                            Divider().padding(.top, MatteTheme.Spacing.sm)
                                         }
                                     }
                                 }
@@ -205,8 +199,8 @@ struct InventoryControllerTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
+                .padding(.horizontal, MatteTheme.Spacing.horizontalMargin)
+                .padding(.top, MatteTheme.Spacing.lg)
                 .padding(.bottom, 96)
             }
             .background(MatteTheme.Colors.dashboardBackground.ignoresSafeArea())
@@ -224,7 +218,7 @@ struct InventoryControllerTabView: View {
     private var variancesTab: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
+                VStack(spacing: MatteTheme.Spacing.sectionSpacing) {
                     infoCard(
                         title: "Audit & Discrepancies",
                         subtitle: "Compare expected stock with physical cycle counts. All logged variances are reported to Corporate Admin.",
@@ -233,36 +227,26 @@ struct InventoryControllerTabView: View {
 
                     HStack {
                         Spacer()
-                        Button(action: { showReportVarianceSheet = true }) {
-                            HStack {
-                                Image(systemName: "plus")
-                                Text("Report Discrepancy")
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(MatteTheme.Colors.ivoryMatte)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(MatteTheme.Colors.espresso)
-                            .cornerRadius(12)
-                        }
+                        LiquidGlassButton(title: "Report Discrepancy", action: { showReportVarianceSheet = true })
                     }
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, MatteTheme.Spacing.xs)
 
                     sectionCard(title: "Discrepancy Records", icon: "doc.text.magnifyingglass") {
                         if authManager.varianceRecords.isEmpty {
                             Text("No stock discrepancies recorded.")
-                                .font(.subheadline)
+                                .font(MatteTheme.Typography.subheadline)
                                 .foregroundColor(MatteTheme.Colors.textSecondary)
                         } else {
-                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: MatteTheme.Spacing.elementSpacing) {
                                 ForEach(authManager.varianceRecords) { record in
                                     let product = authManager.products.first(where: { $0.id == record.productID })
                                     let pName = product?.name ?? "Unknown Product"
                                     
-                                    VStack(alignment: .leading, spacing: 6) {
+                                    VStack(alignment: .leading, spacing: MatteTheme.Spacing.sm) {
                                         HStack {
                                             Text(pName)
-                                                .font(.subheadline.weight(.semibold))
+                                                .font(MatteTheme.Typography.subheadline)
+                                                .fontWeight(.semibold)
                                                 .foregroundColor(MatteTheme.Colors.textPrimary)
                                             Spacer()
                                             BadgeView(
@@ -280,35 +264,35 @@ struct InventoryControllerTabView: View {
                                                 .fontWeight(.semibold)
                                                 .foregroundColor(record.variance < 0 ? MatteTheme.Colors.error : MatteTheme.Colors.success)
                                         }
-                                        .font(.caption)
+                                        .font(MatteTheme.Typography.caption)
                                         .foregroundColor(MatteTheme.Colors.textSecondary)
                                         
                                         if let reason = record.reason, !reason.isEmpty {
                                             Text("Note: \(reason)")
-                                                .font(.caption2)
+                                                .font(MatteTheme.Typography.caption2)
                                                 .foregroundColor(MatteTheme.Colors.textTertiary)
                                         }
                                         
                                         // Quick resolution buttons for IC
                                         if record.status != .resolved && record.status != .writtenOff {
-                                            HStack(spacing: 10) {
+                                            HStack(spacing: MatteTheme.Spacing.sm) {
                                                 Button("Resolve") {
                                                     try? authManager.updateVarianceStatus(id: record.id, status: .resolved)
                                                 }
-                                                .font(.caption)
+                                                .font(MatteTheme.Typography.caption)
                                                 .foregroundColor(MatteTheme.Colors.success)
                                                 
                                                 Button("Write Off") {
                                                     try? authManager.updateVarianceStatus(id: record.id, status: .writtenOff)
                                                 }
-                                                .font(.caption)
+                                                .font(MatteTheme.Typography.caption)
                                                 .foregroundColor(MatteTheme.Colors.error)
                                             }
-                                            .padding(.top, 4)
+                                            .padding(.top, MatteTheme.Spacing.xs)
                                         }
 
                                         if record.id != authManager.varianceRecords.last?.id {
-                                            Divider().padding(.top, 6)
+                                            Divider().padding(.top, MatteTheme.Spacing.sm)
                                         }
                                     }
                                 }
@@ -316,8 +300,8 @@ struct InventoryControllerTabView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
+                .padding(.horizontal, MatteTheme.Spacing.horizontalMargin)
+                .padding(.top, MatteTheme.Spacing.lg)
                 .padding(.bottom, 96)
             }
             .background(MatteTheme.Colors.dashboardBackground.ignoresSafeArea())
@@ -333,20 +317,20 @@ struct InventoryControllerTabView: View {
     // MARK: - Reusable Components & Subviews
 
     private var welcomeCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: MatteTheme.Spacing.md) {
             if let user = authManager.currentUser {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: MatteTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: MatteTheme.Spacing.xs) {
                         Text("Welcome,")
-                            .font(.subheadline)
+                            .font(MatteTheme.Typography.subheadline)
                             .foregroundColor(MatteTheme.Colors.textSecondary)
                         Text(user.displayName)
-                            .font(.title2.weight(.bold))
+                            .font(MatteTheme.Typography.pageTitle)
                             .foregroundColor(MatteTheme.Colors.textPrimary)
                     }
                     Spacer()
                     Circle()
-                        .fill(MatteTheme.Colors.roleColor(for: user.role).opacity(0.14))
+                        .fill(MatteTheme.Colors.roleColor(for: user.role).opacity(0.12))
                         .frame(width: 52, height: 52)
                         .overlay(
                             Image(systemName: user.role.icon)
@@ -355,52 +339,60 @@ struct InventoryControllerTabView: View {
                         )
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: MatteTheme.Spacing.sm) {
                     BadgeView(text: user.role.rawValue, color: MatteTheme.Colors.roleColor(for: user.role))
                     BadgeView(text: user.storeName, color: MatteTheme.Colors.textSecondary)
                 }
             }
         }
-        .padding(20)
+        .padding(MatteTheme.Spacing.cardPadding)
         .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
+        .cornerRadius(MatteTheme.CornerRadius.large)
+        .overlay(RoundedRectangle(cornerRadius: MatteTheme.CornerRadius.large).stroke(MatteTheme.Colors.borderLight, lineWidth: 1))
+        .shadow(color: MatteTheme.Colors.textPrimary.opacity(0.04), radius: 16, x: 0, y: 4)
     }
 
     private func infoCard(title: String, subtitle: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).foregroundColor(MatteTheme.Colors.primaryGold)
+        VStack(alignment: .leading, spacing: MatteTheme.Spacing.sm) {
+            HStack(spacing: MatteTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(MatteTheme.Colors.accent)
                 Text(title)
-                    .font(.headline)
+                    .font(MatteTheme.Typography.sectionHeader)
                     .foregroundColor(MatteTheme.Colors.textPrimary)
             }
             Text(subtitle)
-                .font(.subheadline)
+                .font(MatteTheme.Typography.subheadline)
                 .foregroundColor(MatteTheme.Colors.textSecondary)
+                .lineSpacing(2)
         }
-        .padding(20)
+        .padding(MatteTheme.Spacing.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
+        .cornerRadius(MatteTheme.CornerRadius.large)
+        .overlay(RoundedRectangle(cornerRadius: MatteTheme.CornerRadius.large).stroke(MatteTheme.Colors.borderLight, lineWidth: 1))
+        .shadow(color: MatteTheme.Colors.textPrimary.opacity(0.04), radius: 12, x: 0, y: 4)
     }
 
     private func sectionCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: icon).foregroundColor(MatteTheme.Colors.primaryGold)
+        VStack(alignment: .leading, spacing: MatteTheme.Spacing.md) {
+            HStack(spacing: MatteTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(MatteTheme.Colors.accent)
                 Text(title)
-                    .font(.headline)
+                    .font(MatteTheme.Typography.sectionHeader)
                     .foregroundColor(MatteTheme.Colors.textPrimary)
                 Spacer()
             }
             content()
         }
-        .padding(20)
+        .padding(MatteTheme.Spacing.cardPadding)
         .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
+        .cornerRadius(MatteTheme.CornerRadius.large)
+        .overlay(RoundedRectangle(cornerRadius: MatteTheme.CornerRadius.large).stroke(MatteTheme.Colors.borderLight, lineWidth: 1))
+        .shadow(color: MatteTheme.Colors.textPrimary.opacity(0.04), radius: 12, x: 0, y: 4)
     }
 
     private enum StockStatus { case healthy, low, critical }
@@ -458,16 +450,16 @@ struct InventoryControllerTabView: View {
                     Section {
                         Text(error)
                             .foregroundColor(MatteTheme.Colors.error)
-                            .font(.caption)
+                            .font(MatteTheme.Typography.caption)
                     }
                 }
 
                 Button("Post Stock Movement") {
                     postMovement()
                 }
-                .font(.headline)
+                .font(MatteTheme.Typography.headline)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .foregroundColor(MatteTheme.Colors.primaryGold)
+                .foregroundColor(MatteTheme.Colors.accent)
             }
             .navigationTitle("Log Stock Movement")
             .toolbar {
@@ -528,16 +520,16 @@ struct InventoryControllerTabView: View {
                     Section {
                         Text(error)
                             .foregroundColor(MatteTheme.Colors.error)
-                            .font(.caption)
+                            .font(MatteTheme.Typography.caption)
                     }
                 }
 
                 Button("Submit Report") {
                     submitVariance()
                 }
-                .font(.headline)
+                .font(MatteTheme.Typography.headline)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .foregroundColor(MatteTheme.Colors.primaryGold)
+                .foregroundColor(MatteTheme.Colors.accent)
             }
             .navigationTitle("Report Stock Discrepancy")
             .toolbar {

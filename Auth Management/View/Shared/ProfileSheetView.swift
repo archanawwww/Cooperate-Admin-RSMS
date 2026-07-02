@@ -59,9 +59,7 @@ struct ProfileSheetView: View {
             }
         }
         .padding(20)
-        .background(MatteTheme.Colors.surface)
-        .cornerRadius(20)
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(MatteTheme.Colors.border, lineWidth: 1))
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
     }
 
     private func profileRow(title: String, value: String) -> some View {
@@ -107,12 +105,7 @@ extension View {
         self
             .textFieldStyle(.plain)
             .padding(14)
-            .background(MatteTheme.Colors.surface.opacity(0.9))
-            .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(MatteTheme.Colors.border, lineWidth: 1)
-            )
+            .glassEffect(.regular, in: .rect(cornerRadius: 12))
     }
 }
 

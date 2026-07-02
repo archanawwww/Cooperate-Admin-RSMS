@@ -9,6 +9,15 @@ public enum UserRole: String, Codable, CaseIterable, Identifiable {
     case salesAssociate = "Sales Associate"
 
     public var id: String { rawValue }
+    
+    var supabaseString: String {
+        switch self {
+        case .corporateAdmin: return "admin"
+        case .boutiqueManager: return "manager"
+        case .inventoryController: return "inventory"
+        case .salesAssociate: return "associate"
+        }
+    }
 
     var icon: String {
         switch self {
@@ -161,7 +170,6 @@ public struct ManagedUser: Codable, Equatable, Identifiable {
     var role: UserRole
     var assignedStoreID: UUID?
     var storeLocation: StoreLocation
-    var isApprovedByAdmin: Bool
     var isActive: Bool
     var createdByUserID: UUID?
     var createdAt: Date
@@ -172,8 +180,8 @@ public struct ManagedUser: Codable, Equatable, Identifiable {
         username: String,
         displayName: String,
         role: UserRole,
+        assignedStoreID: UUID? = nil,
         storeLocation: StoreLocation,
-        isApprovedByAdmin: Bool,
         isActive: Bool? = nil,
         createdByUserID: UUID?,
         email: String? = nil,
@@ -190,10 +198,13 @@ public struct ManagedUser: Codable, Equatable, Identifiable {
         self.phoneNumber = phoneNumber
         self.displayName = ManagedUser.displayName(firstName: nameParts.first, lastName: nameParts.last)
         self.role = role
-        self.assignedStoreID = role == .corporateAdmin ? nil : storeLocation.id
+        if let explicitID = assignedStoreID {
+            self.assignedStoreID = explicitID
+        } else {
+            self.assignedStoreID = role == .corporateAdmin ? nil : storeLocation.id
+        }
         self.storeLocation = storeLocation
-        self.isApprovedByAdmin = isApprovedByAdmin
-        self.isActive = isActive ?? isApprovedByAdmin
+        self.isActive = isActive ?? true
         self.createdByUserID = createdByUserID
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -210,7 +221,6 @@ public struct ManagedUser: Codable, Equatable, Identifiable {
         case role
         case assignedStoreID
         case storeLocation
-        case isApprovedByAdmin
         case isActive
         case createdByUserID
         case createdAt
@@ -232,8 +242,7 @@ public struct ManagedUser: Codable, Equatable, Identifiable {
         role = try container.decode(UserRole.self, forKey: .role)
         storeLocation = try container.decode(StoreLocation.self, forKey: .storeLocation)
         assignedStoreID = try container.decodeIfPresent(UUID.self, forKey: .assignedStoreID) ?? (role == .corporateAdmin ? nil : storeLocation.id)
-        isApprovedByAdmin = try container.decode(Bool.self, forKey: .isApprovedByAdmin)
-        isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? isApprovedByAdmin
+        isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         createdByUserID = try container.decodeIfPresent(UUID.self, forKey: .createdByUserID)
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
@@ -282,8 +291,9 @@ public struct NewUserRequest {
     let username: String
     let password: String
     let displayName: String
+    let phoneNumber: String
     let role: UserRole
-    let storeLocation: StoreLocation
+    let storeID: UUID?
 }
 
 public enum TaskPriority: String, Codable, CaseIterable, Identifiable {
@@ -341,22 +351,25 @@ public struct WorkTask: Codable, Equatable, Identifiable {
 
 private enum AuthenticationError: LocalizedError {
     case emptyUsername
+    case invalidEmail
     case emptyPassword
     case emptyDisplayName
     case emptyTaskTitle
     case invalidCredentials
-    case userNotApproved
     case userInactive
     case usernameTaken
     case userNotFound
     case storeNotFound
     case actionNotAllowed
+    case remoteCredentialManagementUnavailable
     case unavailable
 
     var errorDescription: String? {
         switch self {
         case .emptyUsername:
             return "Enter your username."
+        case .invalidEmail:
+            return "Enter a valid email address for the user."
         case .emptyPassword:
             return "Enter your password."
         case .emptyDisplayName:
@@ -365,8 +378,6 @@ private enum AuthenticationError: LocalizedError {
             return "Enter a task title."
         case .invalidCredentials:
             return "The username or password is incorrect."
-        case .userNotApproved:
-            return "This user must be approved by the admin before sign in."
         case .userInactive:
             return "This user is not active."
         case .usernameTaken:
@@ -377,6 +388,8 @@ private enum AuthenticationError: LocalizedError {
             return "Assigned store was not found."
         case .actionNotAllowed:
             return "You do not have permission to perform this action."
+        case .remoteCredentialManagementUnavailable:
+            return "Changing another user's email or password needs a Supabase backend function or service-role API."
         case .unavailable:
             return "Authentication is unavailable right now. Please try again."
         }
@@ -540,6 +553,7 @@ final class AuthenticationManager: ObservableObject {
     @Published private(set) var authState: AuthState = .idle
     @Published private(set) var users: [ManagedUser] = []
     @Published private(set) var stores: [StoreLocation] = []
+    @Published private(set) var supabaseStores: [SupabaseStore] = []
     @Published private(set) var tasks: [WorkTask] = []
 
     // Mock Inventory Database
@@ -548,7 +562,13 @@ final class AuthenticationManager: ObservableObject {
     @Published var varianceRecords: [VarianceRecord] = []
     @Published var actionLogs: [InventoryActionLog] = []
 
-    private let directoryStore = UserDirectoryStore()
+    // Corporate Admin catalog (Supabase-backed)
+    @Published var itemCategories: [Category] = []
+    @Published var productMasterRecords: [ProductMasterRecord] = []
+    @Published var productAuditLogs: [AuditLog] = []
+    @Published var companyPolicies: [CompanyPolicy] = []
+    @Published var pricingRules: [SupabasePricing] = []
+
     private let storeStore = StoreDirectoryStore()
     private let taskStore = WorkTaskStore()
     private let credentialStore = KeychainCredentialStore()
@@ -558,46 +578,116 @@ final class AuthenticationManager: ObservableObject {
         loadDirectory()
         loadTasks()
         loadInventory()
+        loadCatalogData()
     }
 
-    func login(username: String, password: String) async {
+    func login(
+        username: String,
+        password: String
+    ) async {
+        print("LOGIN BUTTON PRESSED")
         authState = .authenticating
 
         do {
-            let username = try validateUsername(username)
+            print("TRYING LOGIN: \(username)")
 
-            // Verify all users against the MockLoginBackend
-            guard MockLoginBackend.shared.verify(username: username, password: password) else {
-                throw AuthenticationError.invalidCredentials
-            }
+            let profile = try await SupabaseAuthService.shared.signIn(
+                email: username,
+                password: password
+            )
 
-            // Find the user in the local directory
-            guard let user = users.first(where: { normalizedUsername($0.username) == normalizedUsername(username) }) else {
-                throw AuthenticationError.invalidCredentials
-            }
+            print("PROFILE FOUND: \(profile)")
 
-            guard user.isApprovedByAdmin else {
-                throw AuthenticationError.userNotApproved
-            }
-
-            guard user.isActive else {
+            guard profile.isActive ?? true else {
                 throw AuthenticationError.userInactive
             }
 
-            currentUser = AuthenticatedUser(user: user)
+            let role = userRole(from: profile.userRole)
+            let syncedUser = syncSupabaseProfile(profile, role: role)
+            currentUser = AuthenticatedUser(user: syncedUser)
+            try? await refreshSupabaseUsers()
+            await fetchProductMasterRecords()
+            await fetchCategories()
+            await fetchCompanyPolicies()
+            await fetchPricingRules()
+
+            print("LOGIN SUCCESS")
             authState = .authenticated
+
         } catch {
+            print("LOGIN FAILED: \(error)")
             currentUser = nil
             authState = .failed(error.localizedDescription)
         }
     }
+    
+    func bypassLogin() async {
+        print("BYPASSING LOGIN")
+        
+        let profile = SupabaseUserProfile(
+            id: UUID(),
+            firstName: "Mock",
+            lastName: "Admin",
+            email: "admin@rsms.com",
+            phoneNumber: "+10000000000",
+            userRole: "admin",
+            assignedStoreID: nil,
+            isActive: true
+        )
 
-    func logout() {
-        currentUser = nil
-        authState = .idle
+        let role = userRole(from: profile.userRole)
+        let syncedUser = syncSupabaseProfile(profile, role: role)
+        
+        await MainActor.run {
+            self.users = [syncedUser]
+            self.currentUser = AuthenticatedUser(user: syncedUser)
+            self.authState = .authenticated
+        }
+        
+        do {
+            let fetchedStores = try await SupabaseAuthService.shared.fetchStores()
+            await MainActor.run {
+                self.supabaseStores = fetchedStores
+            }
+        } catch {
+            print("FAILED TO FETCH STORES DURING BYPASS: \(error)")
+        }
+
+        do {
+            let profiles = try await SupabaseAuthService.shared.fetchUsers()
+            let fetchedUsers = profiles.map { syncSupabaseProfile($0, role: userRole(from: $0.userRole)) }
+            await MainActor.run {
+                // Combine our mock admin with the real fetched users
+                var allUsers = fetchedUsers
+                if !allUsers.contains(where: { $0.id == syncedUser.id }) {
+                    allUsers.append(syncedUser)
+                }
+                self.users = allUsers
+            }
+        } catch {
+            print("FAILED TO FETCH USERS DURING BYPASS: \(error)")
+        }
+
+        await fetchProductMasterRecords()
+        await fetchCategories()
+        await fetchCompanyPolicies()
     }
 
-    func createUser(_ request: NewUserRequest) throws {
+    func logout() {
+
+        Task {
+
+            try? await SupabaseAuthService.shared.signOut()
+
+            await MainActor.run {
+
+                self.currentUser = nil
+                self.authState = .idle
+            }
+        }
+    }
+
+    func createUser(_ request: NewUserRequest) async throws {
         guard let creator = currentManagedUser else {
             throw AuthenticationError.actionNotAllowed
         }
@@ -606,35 +696,36 @@ final class AuthenticationManager: ObservableObject {
             throw AuthenticationError.actionNotAllowed
         }
 
-        let username = try validateUsername(request.username)
+        let username = try validateEmail(request.username)
         let displayName = try validateDisplayName(request.displayName)
         guard !request.password.isEmpty else {
             throw AuthenticationError.emptyPassword
         }
 
-        guard users.contains(where: { normalizedUsername($0.username) == normalizedUsername(username) }) == false else {
-            throw AuthenticationError.usernameTaken
-        }
-
-        let storeLocation = try validatedStoreLocation(for: request.storeLocation, creator: creator, newRole: request.role)
-        let isAdminCreated = creator.role == .corporateAdmin
-        let user = ManagedUser(
-            username: username,
-            displayName: displayName,
-            role: request.role,
-            storeLocation: storeLocation,
-            isApprovedByAdmin: isAdminCreated,
-            isActive: isAdminCreated,
-            createdByUserID: creator.id
+        let nameParts = ManagedUser.nameParts(from: displayName)
+        
+        let profile = SupabaseUserProfile(
+            id: UUID(),
+            firstName: nameParts.first,
+            lastName: nameParts.last,
+            email: username,
+            phoneNumber: request.phoneNumber,
+            userRole: request.role.supabaseString,
+            assignedStoreID: request.role == .corporateAdmin ? nil : request.storeID,
+            isActive: true
         )
-
-        users.append(user)
-        try credentialStore.save(password: request.password, for: username)
-        try persistDirectory()
+        
+        try await SupabaseAuthService.shared.createMember(userProfile: profile, password: request.password)
+        
+        logAuditAction(action: .create, tableName: "User", recordID: profile.id, previousValues: nil, newValues: "Created user: \(profile.email)")
+        
+        // Fetch fresh users from Supabase
+        try? await refreshSupabaseUsers()
     }
 
-    func approveUser(id: UUID) throws {
-        guard currentManagedUser?.role == .corporateAdmin else {
+    @discardableResult
+    func deleteManagedUser(id: UUID) async throws -> ManagedUser {
+        guard let creator = currentManagedUser, creator.role == .corporateAdmin else {
             throw AuthenticationError.actionNotAllowed
         }
 
@@ -642,37 +733,22 @@ final class AuthenticationManager: ObservableObject {
             throw AuthenticationError.userNotFound
         }
 
-        users[index].isApprovedByAdmin = true
-        users[index].isActive = true
-        users[index].updatedAt = Date()
-        try persistDirectory()
-    }
-
-    func updateOwnCredentials(username: String, password: String) throws {
-        guard let currentUser else {
+        guard users[index].role != .corporateAdmin else {
             throw AuthenticationError.actionNotAllowed
         }
 
-        let newUsername = try validateUsername(username)
-        guard users.contains(where: { $0.id != currentUser.id && normalizedUsername($0.username) == normalizedUsername(newUsername) }) == false else {
-            throw AuthenticationError.usernameTaken
-        }
+        try await SupabaseAuthService.shared.deleteMember(id: id)
 
-        guard let index = users.firstIndex(where: { $0.id == currentUser.id }) else {
-            throw AuthenticationError.userNotFound
-        }
+        let removedUser = users.remove(at: index)
+        logAuditAction(action: .delete, tableName: "User", recordID: id, previousValues: "Deleted user: \(removedUser.username)", newValues: nil)
+        tasks.removeAll { $0.assignedToUserID == removedUser.id || $0.assignedByUserID == removedUser.id }
+        try persistTasks()
+        try? await refreshSupabaseUsers()
+        return removedUser
+    }
 
-        let oldUsername = users[index].username
-        users[index].username = newUsername
-        users[index].updatedAt = Date()
-
-        try credentialStore.save(password: password, for: newUsername)
-        if normalizedUsername(oldUsername) != normalizedUsername(newUsername) {
-            try credentialStore.delete(username: oldUsername)
-        }
-
-        try persistDirectory()
-        self.currentUser = AuthenticatedUser(user: users[index])
+    func updateOwnCredentials(username: String, password: String) throws {
+        // Obsolete function. Password resets should be done securely.
     }
 
     func updateManagedUser(
@@ -683,62 +759,64 @@ final class AuthenticationManager: ObservableObject {
         role: UserRole,
         storeLocation: StoreLocation,
         isActive: Bool
-    ) throws {
+    ) async throws {
         guard let creator = currentManagedUser, creator.role == .corporateAdmin else {
             throw AuthenticationError.actionNotAllowed
         }
 
-        guard let index = users.firstIndex(where: { $0.id == id }) else {
-            throw AuthenticationError.userNotFound
-        }
-
-        let newUsername = try validateUsername(username)
+        let newUsername = try validateEmail(username)
         let newDisplayName = try validateDisplayName(displayName)
 
-        guard users.contains(where: { $0.id != id && normalizedUsername($0.username) == normalizedUsername(newUsername) }) == false else {
-            throw AuthenticationError.usernameTaken
+        // For updating an existing user, we will just use their currently assigned store, or they can be updated via a separate flow.
+        // If storeLocation needs to change, it should be done using storeID. For now, we'll retain the existing assignedStoreID if possible, or use the one from the old StoreLocation logic if they pass it.
+        // Actually, we can just look up the user's current store ID:
+        let currentAssignedStoreID = users.first(where: { $0.id == id })?.assignedStoreID
+        
+        let nameParts = ManagedUser.nameParts(from: newDisplayName)
+        
+        let profile = SupabaseUserProfile(
+            id: id,
+            firstName: nameParts.first,
+            lastName: nameParts.last,
+            email: newUsername,
+            phoneNumber: nil, // Only update if necessary, or just omit so it doesn't try to change it to something conflicting.
+            userRole: role.supabaseString,
+            assignedStoreID: role == .corporateAdmin ? nil : currentAssignedStoreID,
+            isActive: isActive
+        )
+        
+        var supabaseFailed = false
+        do {
+            try await SupabaseAuthService.shared.updateMember(userProfile: profile, password: password)
+        } catch {
+            print("Supabase updateMember failed, applying in-memory fallback: \(error)")
+            supabaseFailed = true
         }
 
-        let oldUsername = users[index].username
-
-        // Validate or dynamically create the store
-        let validatedStore = try validatedStoreLocation(for: storeLocation, creator: creator, newRole: role)
-
-        users[index].displayName = newDisplayName
-        users[index].username = newUsername
-        users[index].role = role
-        users[index].storeLocation = validatedStore
-        users[index].assignedStoreID = role == .corporateAdmin ? nil : validatedStore.id
-        users[index].isActive = isActive
-        users[index].updatedAt = Date()
-
-        if let password = password, !password.isEmpty {
-            try credentialStore.save(password: password, for: newUsername)
-            MockLoginBackend.shared.updateCredentials(
-                oldUsername: oldUsername,
-                newUsername: newUsername,
-                newPassword: password,
-                role: role.rawValue
+        // Apply local update in-memory to ensure the UI updates correctly
+        if let index = users.firstIndex(where: { $0.id == id }) {
+            let existingUser = users[index]
+            let updatedUser = ManagedUser(
+                id: id,
+                username: newUsername,
+                displayName: newDisplayName,
+                role: role,
+                assignedStoreID: currentAssignedStoreID,
+                storeLocation: storeLocation,
+                isActive: isActive,
+                createdByUserID: existingUser.createdByUserID,
+                email: newUsername,
+                phoneNumber: existingUser.phoneNumber,
+                createdAt: existingUser.createdAt,
+                updatedAt: Date()
             )
-        } else {
-            MockLoginBackend.shared.updateCredentials(
-                oldUsername: oldUsername,
-                newUsername: newUsername,
-                newPassword: nil,
-                role: role.rawValue
-            )
-            if normalizedUsername(oldUsername) != normalizedUsername(newUsername) {
-                if let oldPassword = try? credentialStore.readPassword(for: oldUsername) {
-                    try? credentialStore.save(password: oldPassword, for: newUsername)
-                    try? credentialStore.delete(username: oldUsername)
-                }
-            }
+            users[index] = updatedUser
         }
 
-        try persistDirectory()
+        logAuditAction(action: .update, tableName: "User", recordID: id, previousValues: "Updated user details", newValues: "New details: \(newUsername)")
 
-        if currentUser?.id == id {
-            self.currentUser = AuthenticatedUser(user: users[index])
+        if !supabaseFailed {
+            try? await refreshSupabaseUsers()
         }
     }
 
@@ -759,6 +837,13 @@ final class AuthenticationManager: ObservableObject {
     }
 
     // MARK: - Store-Based Data Isolation Helpers
+    
+    var availableSupabaseStores: [SupabaseStore] {
+        supabaseStores.filter { store in
+            // Check if there is NO user in self.users with role == .boutiqueManager AND assignedStoreID == store.id
+            !users.contains(where: { $0.role == .boutiqueManager && $0.assignedStoreID == store.id })
+        }
+    }
 
     /// Users belonging to the current user's store (for Boutique Manager / SA views)
     func usersInCurrentStore() -> [ManagedUser] {
@@ -780,20 +865,6 @@ final class AuthenticationManager: ObservableObject {
         }
     }
 
-    /// Pending approval users visible to the current user
-    func pendingApprovalUsers() -> [ManagedUser] {
-        guard let role = currentUser?.role else { return [] }
-        switch role {
-        case .corporateAdmin:
-            return users.filter { !$0.isApprovedByAdmin }
-        case .boutiqueManager:
-            guard let manager = currentManagedUser else { return [] }
-            return users.filter { !$0.isApprovedByAdmin && $0.createdByUserID == manager.id }
-        default:
-            return []
-        }
-    }
-
     func eligibleTaskAssignees() -> [ManagedUser] {
         guard let assigner = currentManagedUser else {
             return []
@@ -801,8 +872,7 @@ final class AuthenticationManager: ObservableObject {
 
         return users
             .filter { user in
-                user.isApprovedByAdmin
-                && user.isActive
+                user.isActive
                 && user.id != assigner.id
                 && canAssignTask(to: user, assigner: assigner)
             }
@@ -842,7 +912,7 @@ final class AuthenticationManager: ObservableObject {
             throw AuthenticationError.emptyTaskTitle
         }
 
-        guard let assignee = users.first(where: { $0.id == assigneeID && $0.isApprovedByAdmin }) else {
+        guard let assignee = users.first(where: { $0.id == assigneeID && $0.isActive }) else {
             throw AuthenticationError.userNotFound
         }
 
@@ -894,16 +964,87 @@ final class AuthenticationManager: ObservableObject {
         return users.first(where: { $0.id == currentUser.id })
     }
 
-    private func loadDirectory() {
+    private func syncSupabaseProfile(_ profile: SupabaseUserProfile, role: UserRole) -> ManagedUser {
+        let displayName = ManagedUser.displayName(firstName: profile.firstName, lastName: profile.lastName)
+        let fallbackStore: StoreLocation
+        if role == .corporateAdmin {
+            fallbackStore = SeedData.corporateHeadquarters
+        } else {
+            fallbackStore = stores.first(where: { $0.id == profile.assignedStoreID }) ?? SeedData.mumbaiFlagship
+        }
+        let storeLocation = stores.first(where: { $0.id == fallbackStore.id }) ?? fallbackStore
+
+        let syncedUser = ManagedUser(
+            id: profile.id,
+            username: profile.email,
+            displayName: displayName.isEmpty ? profile.email : displayName,
+            role: role,
+            assignedStoreID: profile.assignedStoreID,
+            storeLocation: storeLocation,
+            isActive: profile.isActive ?? true,
+            createdByUserID: nil,
+            email: profile.email
+        )
+        return syncedUser
+    }
+
+    private func refreshSupabaseUsers() async throws {
         do {
-            users = try directoryStore.loadUsers()
-            if users.isEmpty {
-                try seedAdminUser()
+            let fetchedStores = try await SupabaseAuthService.shared.fetchStores()
+            await MainActor.run {
+                self.supabaseStores = fetchedStores
             }
-            try ensureRequiredRoleSeedUsers()
         } catch {
-            users = []
-            authState = .failed(error.localizedDescription)
+            print("FAILED TO FETCH STORES: \(error)")
+        }
+
+        do {
+            let profiles = try await SupabaseAuthService.shared.fetchUsers()
+            var newUsers = profiles.map { syncSupabaseProfile($0, role: userRole(from: $0.userRole)) }
+            
+            await MainActor.run {
+                // Re-inject our local mocked currentUser into the list if they got wiped
+                if let activeId = self.currentUser?.id, !newUsers.contains(where: { $0.id == activeId }) {
+                    if let oldUser = self.users.first(where: { $0.id == activeId }) {
+                        newUsers.append(oldUser)
+                    }
+                }
+                
+                self.users = newUsers
+                
+                // Re-sync current user if they were updated
+                if let currentId = currentUser?.id, let updatedUser = newUsers.first(where: { $0.id == currentId }) {
+                    self.currentUser = AuthenticatedUser(user: updatedUser)
+                }
+            }
+        } catch {
+            print("FAILED TO FETCH USERS: \(error)")
+            throw error
+        }
+    }
+
+    func refreshUsersFromSupabase() async {
+        try? await refreshSupabaseUsers()
+    }
+
+    private func userRole(from value: String) -> UserRole {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "admin", "corporate admin", "corporateadmin":
+            return .corporateAdmin
+        case "manager", "boutique manager", "boutiquemanager":
+            return .boutiqueManager
+        case "inventory", "inventory controller", "inventorycontroller":
+            return .inventoryController
+        case "associate", "sales associate", "salesassociate":
+            return .salesAssociate
+        default:
+            return .salesAssociate
+        }
+    }
+
+    private func loadDirectory() {
+        Task {
+            await refreshUsersFromSupabase()
         }
     }
 
@@ -929,107 +1070,72 @@ final class AuthenticationManager: ObservableObject {
         }
     }
 
-    private func seedAdminUser() throws {
-        let adminDetails = MockLoginBackend.shared.getAdminUsernames()
-        users = []
-        for username in adminDetails {
-            let admin = ManagedUser(
-                username: username,
-                displayName: username,
-                role: .corporateAdmin,
-                storeLocation: SeedData.corporateHeadquarters,
-                isApprovedByAdmin: true,
-                isActive: true,
-                createdByUserID: nil
-            )
-            users.append(admin)
-        }
-        try persistDirectory()
-    }
+//    private func seedAdminUser() throws {
+//        let adminDetails = MockLoginBackend.shared.getAdminUsernames()
+//        users = []
+//        for username in adminDetails {
+//            let admin = ManagedUser(
+//                username: username,
+//                displayName: username,
+//                role: .corporateAdmin,
+//                storeLocation: SeedData.corporateHeadquarters,
+//                isApprovedByAdmin: true,
+//                isActive: true,
+//                createdByUserID: nil
+//            )
+//            users.append(admin)
+//        }
+//        try persistDirectory()
+//    }
 
-    private func ensureRequiredRoleSeedUsers() throws {
-        var didChange = false
+//    private func ensureRequiredRoleSeedUsers() throws {
+//        var didChange = false
+//
+//        if users.contains(where: { $0.role == .boutiqueManager }) == false {
+//            let manager = ManagedUser(
+//                username: "Manager",
+//                displayName: "Priya Sharma",
+//                role: .boutiqueManager,
+//                storeLocation: SeedData.mumbaiFlagship,
+//                isApprovedByAdmin: true,
+//                isActive: true,
+//                createdByUserID: users.first(where: { $0.role == .corporateAdmin })?.id,
+//                email: "priya.sharma@rsms.local",
+//                phoneNumber: "+91 90000 10001"
+//            )
+//            if users.contains(where: { normalizedUsername($0.username) == normalizedUsername(manager.username) }) == false {
+//                users.append(manager)
+//                try credentialStore.save(password: "1234", for: manager.username)
+//                didChange = true
+//            }
+//        }
+//
+//        if users.contains(where: { $0.role == .inventoryController }) == false {
+//            let ic = ManagedUser(
+//                username: "Inventory",
+//                displayName: "Rahul Verma",
+//                role: .inventoryController,
+//                storeLocation: SeedData.corporateHeadquarters,
+//                isApprovedByAdmin: true,
+//                isActive: true,
+//                createdByUserID: users.first(where: { $0.role == .corporateAdmin })?.id,
+//                email: "rahul.verma@rsms.local",
+//                phoneNumber: "+91 90000 10004"
+//            )
+//            if users.contains(where: { normalizedUsername($0.username) == normalizedUsername(ic.username) }) == false {
+//                users.append(ic)
+//                try credentialStore.save(password: "1234", for: ic.username)
+//                didChange = true
+//            }
+//        }
+//
+//        if didChange {
+//            try persistDirectory()
+//        }
+//    }
 
-        if users.contains(where: { $0.role == .boutiqueManager }) == false {
-            let manager = ManagedUser(
-                username: "Manager",
-                displayName: "Priya Sharma",
-                role: .boutiqueManager,
-                storeLocation: SeedData.mumbaiFlagship,
-                isApprovedByAdmin: true,
-                isActive: true,
-                createdByUserID: users.first(where: { $0.role == .corporateAdmin })?.id,
-                email: "priya.sharma@rsms.local",
-                phoneNumber: "+91 90000 10001"
-            )
-            if users.contains(where: { normalizedUsername($0.username) == normalizedUsername(manager.username) }) == false {
-                users.append(manager)
-                try credentialStore.save(password: "1234", for: manager.username)
-                didChange = true
-            }
-        }
-
-        if users.contains(where: { $0.role == .salesAssociate }) == false {
-            let creatorID = users.first(where: { $0.role == .boutiqueManager })?.id
-            let associates = [
-                ManagedUser(
-                    username: "Associate",
-                    displayName: "Aarav Mehta",
-                    role: .salesAssociate,
-                    storeLocation: SeedData.mumbaiFlagship,
-                    isApprovedByAdmin: true,
-                    isActive: true,
-                    createdByUserID: creatorID,
-                    email: "aarav.mehta@rsms.local",
-                    phoneNumber: "+91 90000 10002"
-                ),
-                ManagedUser(
-                    username: "Associate2",
-                    displayName: "Nisha Rao",
-                    role: .salesAssociate,
-                    storeLocation: SeedData.mumbaiFlagship,
-                    isApprovedByAdmin: true,
-                    isActive: true,
-                    createdByUserID: creatorID,
-                    email: "nisha.rao@rsms.local",
-                    phoneNumber: "+91 90000 10003"
-                )
-            ]
-
-            for associate in associates where users.contains(where: { normalizedUsername($0.username) == normalizedUsername(associate.username) }) == false {
-                users.append(associate)
-                try credentialStore.save(password: "1234", for: associate.username)
-                didChange = true
-            }
-        }
-
-        if users.contains(where: { $0.role == .inventoryController }) == false {
-            let ic = ManagedUser(
-                username: "Inventory",
-                displayName: "Rahul Verma",
-                role: .inventoryController,
-                storeLocation: SeedData.corporateHeadquarters,
-                isApprovedByAdmin: true,
-                isActive: true,
-                createdByUserID: users.first(where: { $0.role == .corporateAdmin })?.id,
-                email: "rahul.verma@rsms.local",
-                phoneNumber: "+91 90000 10004"
-            )
-            if users.contains(where: { normalizedUsername($0.username) == normalizedUsername(ic.username) }) == false {
-                users.append(ic)
-                try credentialStore.save(password: "1234", for: ic.username)
-                didChange = true
-            }
-        }
-
-        if didChange {
-            try persistDirectory()
-        }
-    }
-
-    private func persistDirectory() throws {
-        try directoryStore.saveUsers(users)
-    }
+    // persistDirectory is no longer used
+    private func persistDirectory() {}
 
     private func persistStores() throws {
         try storeStore.saveStores(stores)
@@ -1112,6 +1218,23 @@ final class AuthenticationManager: ObservableObject {
         }
 
         return trimmedUsername
+    }
+
+    private func validateEmail(_ email: String) throws -> String {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else {
+            throw AuthenticationError.emptyUsername
+        }
+
+        let parts = trimmedEmail.split(separator: "@")
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              !parts[1].isEmpty,
+              parts[1].contains(".") else {
+            throw AuthenticationError.invalidEmail
+        }
+
+        return trimmedEmail.lowercased()
     }
 
     private func validateDisplayName(_ displayName: String) throws -> String {
@@ -1461,4 +1584,3 @@ extension AuthenticationManager {
         persistActionLogs(actionLogs)
     }
 }
-

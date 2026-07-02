@@ -1,40 +1,66 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct ProductEditorView: View {
-    @State private var name: String = ""
-    @State private var sku: String = ""
-    @State private var description: String = ""
-    @State private var selectedCategoryID: UUID? = nil
-    
-    // Authenticity
-    @State private var isNFCEnabled: Bool = false
-    @State private var requiresCertificate: Bool = false
-    @State private var authNotes: String = ""
-    
+    @State private var name = ""
+    @State private var sku = ""
+    @State private var description = ""
+    @State private var category = "Purses"
+    @State private var isNFCEnabled = false
+    @State private var requiresCertificate = false
+    @State private var authNotes = ""
+    @State private var selectedImage: UIImage?
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showImageSourceDialog = false
+    @State private var showCamera = false
+    @State private var showGallery = false
+
     let productToEdit: ProductMasterRecord?
     let categories: [Category]
     var onSave: (ProductMasterRecord) -> Void
     var onCancel: () -> Void
-    
-    // 2FA for action
+
     @State private var show2FA = false
-    
+
+    private var categoryOptions: [String] {
+        var options = Set(categories.map(\.name))
+        if !category.isEmpty { options.insert(category) }
+        return options.sorted()
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                Section("Product Image") {
+                    if let selectedImage {
+                        Image(uiImage: selectedImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 160)
+                            .clipped()
+                            .cornerRadius(12)
+                    }
+
+                    Button {
+                        showImageSourceDialog = true
+                    } label: {
+                        Label("Upload Image", systemImage: "camera.fill")
+                    }
+                }
+
                 Section(header: Text("Basic Info")) {
                     TextField("Product Name", text: $name)
                     TextField("SKU", text: $sku)
                     TextField("Description", text: $description)
-                    
-                    Picker("Category", selection: $selectedCategoryID) {
-                        Text("None").tag(UUID?(nil))
-                        ForEach(categories) { cat in
-                            Text(cat.name).tag(UUID?(cat.id))
+
+                    Picker("Category", selection: $category) {
+                        ForEach(categoryOptions, id: \.self) { cat in
+                            Text(cat).tag(cat)
                         }
                     }
                 }
-                
+
                 Section(header: Text("Authenticity Settings")) {
                     Toggle("NFC Enabled", isOn: $isNFCEnabled)
                     Toggle("Requires Certificate", isOn: $requiresCertificate)
@@ -48,25 +74,38 @@ struct ProductEditorView: View {
                     Button("Cancel", action: onCancel)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        // Trigger 2FA before saving
-                        show2FA = true
-                    }
-                    .disabled(name.isEmpty || sku.isEmpty)
+                    Button("Save") { show2FA = true }
+                        .disabled(name.isEmpty || sku.isEmpty)
                 }
             }
             .sheet(isPresented: $show2FA) {
                 TwoFactorAuthView {
                     show2FA = false
-                    saveProduct()
+                    Task { await saveProduct() }
                 }
+            }
+            .sheet(isPresented: $showCamera) {
+                CameraPicker(image: $selectedImage)
+            }
+            .photosPicker(isPresented: $showGallery, selection: $selectedPhotoItem, matching: .images)
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                Task {
+                    guard let data = try? await newItem?.loadTransferable(type: Data.self),
+                          let image = UIImage(data: data) else { return }
+                    selectedImage = image
+                }
+            }
+            .confirmationDialog("Select Image Source", isPresented: $showImageSourceDialog) {
+                Button("Camera") { showCamera = true }
+                Button("Photo Library") { showGallery = true }
+                Button("Cancel", role: .cancel) { }
             }
             .onAppear {
                 if let p = productToEdit {
                     name = p.name
                     sku = p.sku
                     description = p.description ?? ""
-                    selectedCategoryID = p.categoryID
+                    category = p.category.isEmpty ? "Purses" : p.category
                     isNFCEnabled = p.authenticitySettings.isNFCEnabled
                     requiresCertificate = p.authenticitySettings.requiresCertificate
                     authNotes = p.authenticitySettings.notes ?? ""
@@ -74,21 +113,36 @@ struct ProductEditorView: View {
             }
         }
     }
-    
-    private func saveProduct() {
-        let authSettings = AuthenticitySettings(isNFCEnabled: isNFCEnabled, requiresCertificate: requiresCertificate, notes: authNotes.isEmpty ? nil : authNotes)
-        
+
+    private func saveProduct() async {
+        let authSettings = AuthenticitySettings(
+            isNFCEnabled: isNFCEnabled,
+            requiresCertificate: requiresCertificate,
+            notes: authNotes.isEmpty ? nil : authNotes
+        )
+
+        var imageURL = productToEdit?.imageURL
+        if let selectedImage {
+            imageURL = try? await SupabaseStorageService.shared.uploadProductImage(
+                image: selectedImage,
+                sku: sku
+            )
+        }
+
         let newProduct = ProductMasterRecord(
             id: productToEdit?.id ?? UUID(),
             name: name,
             description: description.isEmpty ? nil : description,
-            categoryID: selectedCategoryID,
+            category: category,
             sku: sku,
             authenticitySettings: authSettings,
             createdAt: productToEdit?.createdAt ?? Date(),
-            updatedAt: Date()
+            updatedAt: Date(),
+            imageURL: imageURL
         )
-        
-        onSave(newProduct)
+
+        await MainActor.run {
+            onSave(newProduct)
+        }
     }
 }
